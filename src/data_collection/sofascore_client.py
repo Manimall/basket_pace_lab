@@ -60,6 +60,9 @@ MINUTES_PER_OT = 5
 # Pace normalised to 40-minute game (FIBA)
 PACE_NORMALISATION_MINUTES = 40
 
+# Dean Oliver coefficient: average possessions consumed per FTA
+FTA_TO_POSS_FACTOR = 0.44
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,12 +76,12 @@ def _calc_possessions(
 ) -> float | None:
     """
     Standard possession estimate:
-        Poss = FGA - OffReb + TO + 0.44 * FTA
+        Poss = FGA + FTA_TO_POSS_FACTOR * FTA - OffReb + TO
     Returns None if any component is missing.
     """
     if any(v is None for v in (fga, fta, off_reb, turnovers)):
         return None
-    return fga - off_reb + turnovers + 0.44 * fta  # type: ignore[operator]
+    return fga + FTA_TO_POSS_FACTOR * fta - off_reb + turnovers  # type: ignore[operator]
 
 
 def _calc_pace(possessions: float | None, period_type: PeriodType) -> float | None:
