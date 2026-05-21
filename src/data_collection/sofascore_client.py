@@ -93,21 +93,33 @@ def _calc_pace(possessions: float | None, period_type: PeriodType) -> float | No
 # ---------------------------------------------------------------------------
 
 FIXTURES_DIR = Path(__file__).parent.parent.parent / "tests" / "fixtures"
+COOKIES_PATH = Path(__file__).parent.parent.parent / "cookies.json"
+
+
+def _load_cookies() -> list[dict] | None:
+    if not COOKIES_PATH.exists():
+        return None
+    try:
+        return json.loads(COOKIES_PATH.read_text())
+    except Exception:
+        return None
 
 
 class SofascoreClient:
     """
     Async client for the Sofascore internal API.
 
-    mock=True — читает данные из tests/fixtures/*.json вместо реального API.
-    Используй для разработки и тестирования DB-пайплайна без внешних запросов.
+    Порядок аутентификации:
+      1. Если есть cookies.json (от fetch_cookies.py) — использует их. Работает без браузера.
+      2. Иначе — пробует warmup через curl_cffi (куки выставляются JS, поэтому часто 403).
+      3. mock=True — читает данные из tests/fixtures/*.json, без сети.
 
     Usage:
-        async with SofascoreClient() as client:
-            match = await client.process_and_save_match(event_id, db_session)
+        # Реальный API (нужен cookies.json):
+        async with SofascoreClient() as client: ...
 
-        async with SofascoreClient(mock=True) as client:
-            match = await client.process_and_save_match(12571063, db_session)
+        # Локальные фикстуры:
+        async with SofascoreClient(mock=True) as client: ...
     """
 
     def __init__(self, impersonate: str = "chrome124", mock: bool = False) -> None:
@@ -118,27 +130,43 @@ class SofascoreClient:
     async def __aenter__(self) -> "SofascoreClient":
         if not self._mock:
             self._session = AsyncSession(impersonate=self._impersonate, headers=HEADERS)
-            await self._warmup()
+            await self._load_saved_cookies()
         else:
             log.info("Mock mode: API requests replaced with local fixtures")
         return self
 
-    async def _warmup(self) -> None:
-        """
-        Открывает главную страницу Sofascore для получения сессионных куков.
-        Без этого Varnish возвращает 403 на API-запросы.
-        """
+    async def _load_saved_cookies(self) -> None:
         assert self._session
-        log.info("Warming up session (fetching sofascore.com cookies)…")
+        cookies = _load_cookies()
+        if cookies:
+            log.info("Loading %d cookies from %s", len(cookies), COOKIES_PATH.name)
+            for c in cookies:
+                # curl_cffi принимает куки через атрибут .cookies (dict-like)
+                try:
+                    self._session.cookies.set(
+                        c["name"], c["value"], domain=c.get("domain", "")
+                    )
+                except Exception:
+                    pass
+            log.info("Cookies loaded — skipping warmup request")
+        else:
+            log.warning(
+                "cookies.json not found. Run 'python fetch_cookies.py' first for live API.\n"
+                "  Falling back to warmup request (may result in 403)."
+            )
+            await self._warmup()
+
+    async def _warmup(self) -> None:
+        assert self._session
         try:
             resp = await self._session.get(
                 WARMUP_URL,
                 headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
                 timeout=15,
             )
-            log.info("  Warmup status: %s | cookies set: %d", resp.status_code, len(self._session.cookies))
+            log.info("Warmup status: %s | cookies: %d", resp.status_code, len(self._session.cookies))
         except Exception as exc:
-            log.warning("  Warmup request failed (will try anyway): %s", exc)
+            log.warning("Warmup failed: %s", exc)
 
     async def __aexit__(self, *_: Any) -> None:
         if self._session:
