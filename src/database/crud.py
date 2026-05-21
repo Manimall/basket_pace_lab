@@ -113,6 +113,12 @@ class QuarterStatRow:
         "q4_includes_ot_points",
         "home_fga",
         "away_fga",
+        "home_fta",
+        "away_fta",
+        "home_off_reb",
+        "away_off_reb",
+        "home_turnovers",
+        "away_turnovers",
         "home_possessions",
         "away_possessions",
         "home_pace",
@@ -129,6 +135,12 @@ class QuarterStatRow:
         q4_includes_ot_points: bool = False,
         home_fga: int | None = None,
         away_fga: int | None = None,
+        home_fta: int | None = None,
+        away_fta: int | None = None,
+        home_off_reb: int | None = None,
+        away_off_reb: int | None = None,
+        home_turnovers: int | None = None,
+        away_turnovers: int | None = None,
         home_possessions: float | None = None,
         away_possessions: float | None = None,
         home_pace: float | None = None,
@@ -142,6 +154,12 @@ class QuarterStatRow:
         self.q4_includes_ot_points = q4_includes_ot_points
         self.home_fga = home_fga
         self.away_fga = away_fga
+        self.home_fta = home_fta
+        self.away_fta = away_fta
+        self.home_off_reb = home_off_reb
+        self.away_off_reb = away_off_reb
+        self.home_turnovers = home_turnovers
+        self.away_turnovers = away_turnovers
         self.home_possessions = home_possessions
         self.away_possessions = away_possessions
         self.home_pace = home_pace
@@ -174,6 +192,12 @@ async def save_quarter_stats(
             q4_includes_ot_points=row.q4_includes_ot_points,
             home_fga=row.home_fga,
             away_fga=row.away_fga,
+            home_fta=row.home_fta,
+            away_fta=row.away_fta,
+            home_off_reb=row.home_off_reb,
+            away_off_reb=row.away_off_reb,
+            home_turnovers=row.home_turnovers,
+            away_turnovers=row.away_turnovers,
             home_possessions=row.home_possessions,
             away_possessions=row.away_possessions,
             home_pace=row.home_pace,

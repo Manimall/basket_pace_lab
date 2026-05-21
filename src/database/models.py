@@ -180,8 +180,18 @@ class QuarterStats(Base):
     q4_includes_ot_points: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # --- Pace / box-score metrics (optional, populated from box-score feeds) ---
+    # Shooting
     home_fga: Mapped[Optional[int]] = mapped_column(SmallInteger)
     away_fga: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    home_fta: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    away_fta: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    # Rebounds
+    home_off_reb: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    away_off_reb: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    # Turnovers
+    home_turnovers: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    away_turnovers: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    # Derived pace metrics (Poss = FGA - OffReb + TO + 0.44*FTA)
     home_possessions: Mapped[Optional[float]] = mapped_column(Float)
     away_possessions: Mapped[Optional[float]] = mapped_column(Float)
     home_pace: Mapped[Optional[float]] = mapped_column(Float)
