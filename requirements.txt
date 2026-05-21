@@ -1,0 +1,22 @@
+# --- Data ---
+pandas==2.2.2
+numpy==1.26.4
+
+# --- ML ---
+catboost==1.2.5
+scikit-learn==1.5.1
+joblib==1.4.2
+
+# --- Database ---
+sqlalchemy==2.0.31
+asyncpg==0.29.0
+alembic==1.13.2
+psycopg2-binary==2.9.9
+
+# --- Config & Validation ---
+pydantic==2.7.4
+pydantic-settings==2.3.4
+python-dotenv==1.0.1
+
+# --- HTTP Clients ---
+httpx==0.27.0
