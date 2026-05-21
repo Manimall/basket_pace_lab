@@ -84,7 +84,7 @@ class Match(Base):
     )
 
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    season: Mapped[str] = mapped_column(String(16), nullable=False)
+    season: Mapped[str] = mapped_column(String(128), nullable=False)
     season_type: Mapped[SeasonType] = mapped_column(
         Enum(SeasonType, name="season_type_enum"), nullable=False, default=SeasonType.REGULAR
     )

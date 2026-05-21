@@ -5,7 +5,9 @@ Requires running PostgreSQL (docker compose up postgres -d).
 Reads DB settings from .env (see .env.example).
 
 Run:
-    python run_parser_test.py [event_id]
+    python run_parser_test.py            # live API
+    python run_parser_test.py --mock     # local fixtures (no internet)
+    python run_parser_test.py 12345678   # different event_id, live
 """
 
 import asyncio
@@ -26,7 +28,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("run_parser_test")
 
-TEST_EVENT_ID = int(sys.argv[1]) if len(sys.argv) > 1 else 12571063
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+flags = [a for a in sys.argv[1:] if a.startswith("--")]
+MOCK_MODE = "--mock" in flags
+TEST_EVENT_ID = int(args[0]) if args else 12571063
 
 # ---------------------------------------------------------------------------
 # Pretty-print helpers
@@ -56,7 +61,10 @@ async def main() -> None:
     # ── Fetch + parse + save ─────────────────────────────────────────────────
     session_factory = get_session_factory()
 
-    async with SofascoreClient() as client:
+    mode_label = "MOCK (local fixtures)" if MOCK_MODE else "LIVE (Sofascore API)"
+    log.info("Mode: %s", mode_label)
+
+    async with SofascoreClient(mock=MOCK_MODE) as client:
         async with session_factory() as session:
             async with session.begin():
                 match = await client.process_and_save_match(TEST_EVENT_ID, session)

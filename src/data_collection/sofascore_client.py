@@ -7,8 +7,10 @@ Sofascore async client.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from curl_cffi.requests import AsyncSession
@@ -25,6 +27,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BASE_URL = "https://api.sofascore.com/api/v1"
+WARMUP_URL = "https://www.sofascore.com/"
 
 HEADERS: dict[str, str] = {
     "Accept": "application/json, text/plain, */*",
@@ -34,6 +37,8 @@ HEADERS: dict[str, str] = {
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-site",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 # Sofascore period label → (period_number, PeriodType)
@@ -87,22 +92,53 @@ def _calc_pace(possessions: float | None, period_type: PeriodType) -> float | No
 # Client
 # ---------------------------------------------------------------------------
 
+FIXTURES_DIR = Path(__file__).parent.parent.parent / "tests" / "fixtures"
+
+
 class SofascoreClient:
     """
     Async client for the Sofascore internal API.
 
+    mock=True — читает данные из tests/fixtures/*.json вместо реального API.
+    Используй для разработки и тестирования DB-пайплайна без внешних запросов.
+
     Usage:
         async with SofascoreClient() as client:
             match = await client.process_and_save_match(event_id, db_session)
+
+        async with SofascoreClient(mock=True) as client:
+            match = await client.process_and_save_match(12571063, db_session)
     """
 
-    def __init__(self, impersonate: str = "chrome124") -> None:
+    def __init__(self, impersonate: str = "chrome124", mock: bool = False) -> None:
         self._impersonate = impersonate
+        self._mock = mock
         self._session: AsyncSession | None = None
 
     async def __aenter__(self) -> "SofascoreClient":
-        self._session = AsyncSession(impersonate=self._impersonate, headers=HEADERS)
+        if not self._mock:
+            self._session = AsyncSession(impersonate=self._impersonate, headers=HEADERS)
+            await self._warmup()
+        else:
+            log.info("Mock mode: API requests replaced with local fixtures")
         return self
+
+    async def _warmup(self) -> None:
+        """
+        Открывает главную страницу Sofascore для получения сессионных куков.
+        Без этого Varnish возвращает 403 на API-запросы.
+        """
+        assert self._session
+        log.info("Warming up session (fetching sofascore.com cookies)…")
+        try:
+            resp = await self._session.get(
+                WARMUP_URL,
+                headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+                timeout=15,
+            )
+            log.info("  Warmup status: %s | cookies set: %d", resp.status_code, len(self._session.cookies))
+        except Exception as exc:
+            log.warning("  Warmup request failed (will try anyway): %s", exc)
 
     async def __aexit__(self, *_: Any) -> None:
         if self._session:
@@ -125,12 +161,23 @@ class SofascoreClient:
             )
         return response.json()
 
+    def _load_fixture(self, name: str) -> dict[str, Any]:
+        path = FIXTURES_DIR / name
+        if not path.exists():
+            raise FileNotFoundError(f"Fixture not found: {path}")
+        return json.loads(path.read_text())
+
     async def _fetch_event(self, event_id: int) -> dict[str, Any]:
+        if self._mock:
+            log.info("  [mock] loading event_%s.json", event_id)
+            return self._load_fixture(f"event_{event_id}.json")["event"]
         data = await self._get(f"/event/{event_id}")
         return data["event"]
 
     async def _fetch_match_stats(self, event_id: int) -> dict[str, Any]:
-        """Возвращает сырой JSON statistics endpoint."""
+        if self._mock:
+            log.info("  [mock] loading statistics_%s.json", event_id)
+            return self._load_fixture(f"statistics_{event_id}.json")
         return await self._get(f"/event/{event_id}/statistics")
 
     # ------------------------------------------------------------------

@@ -1,26 +1,26 @@
 # --- Data ---
-pandas==2.2.2
-numpy==1.26.4
+pandas>=2.2.2
+numpy>=1.26.4
 
 # --- ML ---
-catboost==1.2.5
-scikit-learn==1.5.1
-joblib==1.4.2
+# catboost==1.2.5  # install separately if needed (slow build)
+scikit-learn>=1.5.1
+joblib>=1.4.2
 
 # --- Database ---
-sqlalchemy==2.0.31
-asyncpg==0.29.0
-alembic==1.13.2
-psycopg2-binary==2.9.9
+sqlalchemy>=2.0.31
+asyncpg>=0.30.0          # 0.30+ required for Python 3.13
+alembic>=1.13.2
+psycopg2-binary>=2.9.9
 
 # --- Config & Validation ---
-pydantic==2.7.4
-pydantic-settings==2.3.4
-python-dotenv==1.0.1
+pydantic>=2.8.0           # 2.8+ required for Python 3.13
+pydantic-settings>=2.4.0
+python-dotenv>=1.0.1
 
 # --- HTTP Clients ---
-httpx==0.27.0
+httpx>=0.27.0
 curl_cffi>=0.7.0
 
 # --- Browser Automation ---
-playwright==1.44.0
+playwright>=1.44.0

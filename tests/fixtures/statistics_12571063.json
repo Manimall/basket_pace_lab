@@ -1,0 +1,77 @@
+{
+  "statistics": [
+    {
+      "period": "ALL",
+      "groups": [
+        {"groupName": "Score", "statisticsItems": [{"name": "Points", "home": "89", "away": "73"}]},
+        {"groupName": "Shooting", "statisticsItems": [
+          {"name": "Field Goals", "home": "33/73", "away": "27/68"},
+          {"name": "2-Pointers", "home": "24/49", "away": "20/47"},
+          {"name": "3-Pointers", "home": "9/24", "away": "7/21"},
+          {"name": "Free Throws", "home": "14/18", "away": "12/17"}
+        ]},
+        {"groupName": "Rebounds", "statisticsItems": [
+          {"name": "Offensive Rebounds", "home": "11", "away": "8"},
+          {"name": "Defensive Rebounds", "home": "28", "away": "24"}
+        ]},
+        {"groupName": "Turnovers", "statisticsItems": [{"name": "Turnovers", "home": "10", "away": "14"}]}
+      ]
+    },
+    {
+      "period": "1ST",
+      "groups": [
+        {"groupName": "Score", "statisticsItems": [{"name": "Points", "home": "22", "away": "16"}]},
+        {"groupName": "Shooting", "statisticsItems": [
+          {"name": "Field Goals", "home": "8/18", "away": "6/17"},
+          {"name": "Free Throws", "home": "3/4", "away": "2/3"}
+        ]},
+        {"groupName": "Rebounds", "statisticsItems": [
+          {"name": "Offensive Rebounds", "home": "3", "away": "2"}
+        ]},
+        {"groupName": "Turnovers", "statisticsItems": [{"name": "Turnovers", "home": "3", "away": "4"}]}
+      ]
+    },
+    {
+      "period": "2ND",
+      "groups": [
+        {"groupName": "Score", "statisticsItems": [{"name": "Points", "home": "26", "away": "19"}]},
+        {"groupName": "Shooting", "statisticsItems": [
+          {"name": "Field Goals", "home": "9/19", "away": "7/17"},
+          {"name": "Free Throws", "home": "4/5", "away": "3/4"}
+        ]},
+        {"groupName": "Rebounds", "statisticsItems": [
+          {"name": "Offensive Rebounds", "home": "3", "away": "2"}
+        ]},
+        {"groupName": "Turnovers", "statisticsItems": [{"name": "Turnovers", "home": "2", "away": "4"}]}
+      ]
+    },
+    {
+      "period": "3RD",
+      "groups": [
+        {"groupName": "Score", "statisticsItems": [{"name": "Points", "home": "24", "away": "22"}]},
+        {"groupName": "Shooting", "statisticsItems": [
+          {"name": "Field Goals", "home": "8/18", "away": "8/17"},
+          {"name": "Free Throws", "home": "4/5", "away": "4/5"}
+        ]},
+        {"groupName": "Rebounds", "statisticsItems": [
+          {"name": "Offensive Rebounds", "home": "3", "away": "2"}
+        ]},
+        {"groupName": "Turnovers", "statisticsItems": [{"name": "Turnovers", "home": "3", "away": "3"}]}
+      ]
+    },
+    {
+      "period": "4TH",
+      "groups": [
+        {"groupName": "Score", "statisticsItems": [{"name": "Points", "home": "17", "away": "16"}]},
+        {"groupName": "Shooting", "statisticsItems": [
+          {"name": "Field Goals", "home": "8/18", "away": "6/17"},
+          {"name": "Free Throws", "home": "3/4", "away": "3/5"}
+        ]},
+        {"groupName": "Rebounds", "statisticsItems": [
+          {"name": "Offensive Rebounds", "home": "2", "away": "2"}
+        ]},
+        {"groupName": "Turnovers", "statisticsItems": [{"name": "Turnovers", "home": "2", "away": "3"}]}
+      ]
+    }
+  ]
+}

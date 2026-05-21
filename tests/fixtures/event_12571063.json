@@ -1,0 +1,12 @@
+{
+  "event": {
+    "id": 12571063,
+    "homeTeam": {"id": 3234, "name": "CSKA Moscow", "shortName": "CSKA"},
+    "awayTeam": {"id": 3235, "name": "UNICS Kazan", "shortName": "UNICS"},
+    "homeScore": {"current": 89, "period1": 22, "period2": 26, "period3": 24, "period4": 17},
+    "awayScore": {"current": 73, "period1": 16, "period2": 19, "period3": 22, "period4": 16},
+    "startTimestamp": 1712494800,
+    "season": {"name": "VTB United League 23/24"},
+    "status": {"type": "finished"}
+  }
+}
