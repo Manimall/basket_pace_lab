@@ -26,8 +26,8 @@ from src.config import settings
 from src.database import crud
 from src.database.crud import QuarterStatRow
 from src.database.engine import create_tables, dispose_engine, get_session_factory
-from src.database.models import MatchStatus, PeriodType, SeasonType
-from src.data_collection.sofascore_client import _calc_possessions, _calc_pace
+from src.database.models import MatchStatus, SeasonType
+from src.data_collection.parsers import PERIOD_MAP, SCORE_KEY_MAP, parse_period, safe_int
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,32 +45,6 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 API_HEADERS = {"Accept": "application/json", "Referer": "https://www.sofascore.com/"}
-
-# NBA uses "1Q".."4Q"; EuroLeague uses "1ST".."4TH"
-PERIOD_MAP: dict[str, tuple[int, PeriodType]] = {
-    "1Q": (1, PeriodType.QUARTER),
-    "2Q": (2, PeriodType.QUARTER),
-    "3Q": (3, PeriodType.QUARTER),
-    "4Q": (4, PeriodType.QUARTER),
-    "1ST": (1, PeriodType.QUARTER),
-    "2ND": (2, PeriodType.QUARTER),
-    "3RD": (3, PeriodType.QUARTER),
-    "4TH": (4, PeriodType.QUARTER),
-    "OT":  (1, PeriodType.OVERTIME),
-    "1OT": (1, PeriodType.OVERTIME),
-    "2OT": (2, PeriodType.OVERTIME),
-    "3OT": (3, PeriodType.OVERTIME),
-}
-
-# Maps period label → key in homeScore/awayScore event object
-SCORE_KEY_MAP: dict[str, str] = {
-    "1Q": "period1", "1ST": "period1",
-    "2Q": "period2", "2ND": "period2",
-    "3Q": "period3", "3RD": "period3",
-    "4Q": "period4", "4TH": "period4",
-    "OT": "overtime", "1OT": "overtime",
-    "2OT": "overtime2", "3OT": "overtime3",
-}
 
 
 def _parse_args() -> tuple[int, int, int]:
@@ -114,63 +88,7 @@ async def fetch_event_ids(page: Page, tournament_id: int, season_id: int, max_pa
 
 
 def _safe_int(v: Any) -> int | None:
-    try: return int(v)
-    except: return None
-
-def _parse_shot(s: str) -> tuple[int, int]:
-    # Handles "27/78 (34%)" or plain "27/78"
-    try:
-        parts = str(s).split("/")
-        made = int(parts[0].strip())
-        att = int(parts[1].strip().split()[0].rstrip("(").strip())
-        return made, att
-    except:
-        return 0, 0
-
-def _build_metrics(period_data: dict) -> dict[str, dict]:
-    m: dict[str, dict] = {}
-    for g in period_data.get("groups", []):
-        for item in g.get("statisticsItems", []):
-            name = item.get("name", "").lower().strip()
-            if name:
-                m[name] = {"home": item.get("home"), "away": item.get("away")}
-    return m
-
-def _parse_period(
-    label: str,
-    period_data: dict,
-    home_score: int | None,
-    away_score: int | None,
-) -> QuarterStatRow | None:
-    mapping = PERIOD_MAP.get(label.upper())
-    if not mapping:
-        return None
-    period_number, period_type = mapping
-    m = _build_metrics(period_data)
-
-    _, home_fga = _parse_shot(m.get("field goals", {}).get("home", ""))
-    _, away_fga = _parse_shot(m.get("field goals", {}).get("away", ""))
-    _, home_fta = _parse_shot(m.get("free throws", {}).get("home", ""))
-    _, away_fta = _parse_shot(m.get("free throws", {}).get("away", ""))
-    home_off = _safe_int(m.get("offensive rebounds", {}).get("home"))
-    away_off = _safe_int(m.get("offensive rebounds", {}).get("away"))
-    home_to = _safe_int(m.get("turnovers", {}).get("home"))
-    away_to = _safe_int(m.get("turnovers", {}).get("away"))
-
-    home_poss = _calc_possessions(home_fga or None, home_fta or None, home_off, home_to)
-    away_poss = _calc_possessions(away_fga or None, away_fta or None, away_off, away_to)
-
-    return QuarterStatRow(
-        period_number=period_number, period_type=period_type,
-        home_score=home_score, away_score=away_score,
-        home_fga=home_fga or None, away_fga=away_fga or None,
-        home_fta=home_fta or None, away_fta=away_fta or None,
-        home_off_reb=home_off, away_off_reb=away_off,
-        home_turnovers=home_to, away_turnovers=away_to,
-        home_possessions=home_poss, away_possessions=away_poss,
-        home_pace=_calc_pace(home_poss, period_type),
-        away_pace=_calc_pace(away_poss, period_type),
-    )
+    return safe_int(v)
 
 
 async def process_event(page: Page, event_id: int, session_factory: Any) -> str:
@@ -234,7 +152,7 @@ async def process_event(page: Page, event_id: int, session_factory: Any) -> str:
                 score_key = SCORE_KEY_MAP.get(label)
                 h_score = _safe_int(home_score_raw.get(score_key)) if score_key else None
                 a_score = _safe_int(away_score_raw.get(score_key)) if score_key else None
-                row = _parse_period(label, period_data, h_score, a_score)
+                row = parse_period(label, period_data, h_score, a_score)
                 if row:
                     rows.append(row)
 
