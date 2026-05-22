@@ -56,6 +56,7 @@ PERIOD_MAP: dict[str, tuple[int, PeriodType]] = {
 # FIBA regulation quarter = 10 min. NBA = 12 min. OT = 5 min.
 MINUTES_PER_QUARTER = 10
 MINUTES_PER_OT = 5
+MINUTES_PER_GAME = 40  # full FIBA game (4 × 10 min)
 
 # Pace normalised to 40-minute game (FIBA)
 PACE_NORMALISATION_MINUTES = 40
@@ -85,7 +86,12 @@ def _calc_possessions(
 
 
 def _calc_pace(possessions: float | None, period_type: PeriodType) -> float | None:
-    minutes = MINUTES_PER_OT if period_type == PeriodType.OVERTIME else MINUTES_PER_QUARTER
+    if period_type == PeriodType.GAME:
+        minutes = MINUTES_PER_GAME
+    elif period_type == PeriodType.OVERTIME:
+        minutes = MINUTES_PER_OT
+    else:
+        minutes = MINUTES_PER_QUARTER
     if possessions is None:
         return None
     return round(possessions / minutes * PACE_NORMALISATION_MINUTES, 2)

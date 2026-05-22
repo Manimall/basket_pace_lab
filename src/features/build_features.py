@@ -84,7 +84,8 @@ class BasketballFeatureBuilder:
                         m.home_score_final,
                         m.away_score_final,
                         m.went_to_overtime,
-                        m.season
+                        m.season,
+                        m.has_quarter_breakdown
                     FROM matches m
                     JOIN teams ht ON ht.id = m.home_team_id
                     JOIN teams at ON at.id = m.away_team_id
@@ -97,7 +98,7 @@ class BasketballFeatureBuilder:
             qs_rows = (
                 await db.execute(text("""
                     SELECT
-                        match_id, period_number, period_type,
+                        match_id, period_number, period_type::text AS period_type,
                         home_score,     away_score,
                         home_fga,       away_fga,
                         home_fta,       away_fta,
@@ -106,7 +107,7 @@ class BasketballFeatureBuilder:
                         home_possessions, away_possessions,
                         home_pace,      away_pace
                     FROM quarter_stats
-                    WHERE period_type::text = 'QUARTER'
+                    WHERE period_type::text IN ('QUARTER', 'GAME')
                     ORDER BY match_id, period_number
                 """))
             ).mappings().all()
@@ -125,19 +126,24 @@ class BasketballFeatureBuilder:
         """
         Pivot quarter_stats to wide format and compute game-level metrics.
 
+        Handles two period types:
+          - QUARTER rows: per-quarter pivoting + q-level targets
+          - GAME rows: game-level fallback (e.g. EuroLeague); pace used as proxy for q1_avg_pace
+
         Returns one row per match with:
           - q{1-4}_home_score, q{1-4}_away_score   (quarter scores → targets)
           - q{1-4}_avg_pace, q{1-4}_total           (quarter pace/total → targets)
           - game_total, game_avg_pace                (game-level targets)
           - home/away pace, ft_rate, to_rate, oreb_rate, pts_per_poss (for rolling)
         """
-        reg = qs.copy()  # already filtered to quarter periods in SQL
+        qs_q = qs[qs["period_type"] == "QUARTER"].copy()
+        qs_g = qs[qs["period_type"] == "GAME"].copy()
 
-        # ── per-quarter wide columns ──────────────────────────────────
+        # ── per-quarter wide columns (from QUARTER rows) ──────────────
         q_dfs = []
         for p in range(1, 5):
             q = (
-                reg[reg["period_number"] == p][
+                qs_q[qs_q["period_number"] == p][
                     ["match_id", "home_score", "away_score", "home_pace", "away_pace"]
                 ]
                 .copy()
@@ -156,9 +162,9 @@ class BasketballFeatureBuilder:
                 + q_wide.get(f"q{p}_away_pace", np.nan)
             ) / 2
 
-        # ── game-level aggregates ─────────────────────────────────────
+        # ── game-level aggregates from QUARTER rows ───────────────────
         agg = (
-            reg.groupby("match_id")
+            qs_q.groupby("match_id")
             .agg(
                 home_fga=("home_fga", "sum"),
                 away_fga=("away_fga", "sum"),
@@ -174,6 +180,24 @@ class BasketballFeatureBuilder:
             .reset_index()
         )
 
+        # ── game-level fallback from GAME rows (e.g. EuroLeague) ──────
+        if not qs_g.empty:
+            agg_fb = (
+                qs_g[["match_id", "home_fga", "away_fga", "home_fta", "away_fta",
+                       "home_off_reb", "away_off_reb", "home_turnovers", "away_turnovers",
+                       "home_possessions", "away_possessions"]]
+                .rename(columns={"home_turnovers": "home_to", "away_turnovers": "away_to",
+                                 "home_possessions": "home_poss", "away_possessions": "away_poss"})
+            )
+            agg = agg.merge(agg_fb, on="match_id", how="outer", suffixes=("", "_fb"))
+            for col in ["home_fga", "away_fga", "home_fta", "away_fta",
+                        "home_off_reb", "away_off_reb", "home_to", "away_to",
+                        "home_poss", "away_poss"]:
+                fb = f"{col}_fb"
+                if fb in agg.columns:
+                    agg[col] = agg[col].fillna(agg[fb])
+                    agg.drop(columns=[fb], inplace=True)
+
         df = matches.merge(q_wide, on="match_id", how="left").merge(agg, on="match_id", how="left")
 
         # ── game targets ──────────────────────────────────────────────
@@ -181,12 +205,28 @@ class BasketballFeatureBuilder:
         pace_cols = [f"q{p}_avg_pace" for p in range(1, 5)]
         df["game_avg_pace"] = df[pace_cols].mean(axis=1)
 
+        # For GAME-type matches: fill game_avg_pace and q1_avg_pace from game-level pace
+        if not qs_g.empty:
+            game_pace = (
+                qs_g[["match_id", "home_pace", "away_pace"]]
+                .rename(columns={"home_pace": "home_pace_fb", "away_pace": "away_pace_fb"})
+            )
+            game_pace["game_avg_pace_fb"] = (game_pace["home_pace_fb"] + game_pace["away_pace_fb"]) / 2
+            df = df.merge(game_pace, on="match_id", how="left")
+            df["game_avg_pace"] = df["game_avg_pace"].fillna(df["game_avg_pace_fb"])
+            df["q1_avg_pace"] = df["q1_avg_pace"].fillna(df["game_avg_pace"])
+
         # ── per-team stats for rolling features ───────────────────────
         for side in ("home", "away"):
             poss = df[f"{side}_poss"].replace(0, np.nan)
             fga  = df[f"{side}_fga"].replace(0, np.nan)
 
-            df[f"{side}_pace"] = df[[f"q{p}_{side}_pace" for p in range(1, 5)]].mean(axis=1)
+            q_avg_pace = df[[f"q{p}_{side}_pace" for p in range(1, 5)]].mean(axis=1)
+            if not qs_g.empty and f"{side}_pace_fb" in df.columns:
+                df[f"{side}_pace"] = q_avg_pace.fillna(df[f"{side}_pace_fb"])
+            else:
+                df[f"{side}_pace"] = q_avg_pace
+
             df[f"{side}_ft_rate"]      = df[f"{side}_fta"]     / poss
             df[f"{side}_to_rate"]      = df[f"{side}_to"]      / poss
             df[f"{side}_oreb_rate"]    = df[f"{side}_off_reb"]  / fga
@@ -195,6 +235,11 @@ class BasketballFeatureBuilder:
         # opponent pace (needed as a rolling stat)
         df["home_opp_pace"] = df["away_pace"]
         df["away_opp_pace"] = df["home_pace"]
+
+        # Drop temporary fallback columns
+        fb_cols = [c for c in df.columns if c.endswith("_fb")]
+        if fb_cols:
+            df.drop(columns=fb_cols, inplace=True)
 
         return df
 
@@ -330,7 +375,7 @@ class BasketballFeatureBuilder:
     def get_feature_columns(df: pd.DataFrame) -> list[str]:
         """All input feature columns (rolling + context)."""
         roll = [c for c in df.columns if "_L3" in c or "_L5" in c or "_L10" in c]
-        ctx  = ["is_playoff", "home_days_rest", "away_days_rest"]
+        ctx  = ["is_playoff", "home_days_rest", "away_days_rest", "has_quarter_breakdown"]
         return roll + [c for c in ctx if c in df.columns]
 
     @staticmethod

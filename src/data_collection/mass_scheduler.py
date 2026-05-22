@@ -39,6 +39,7 @@ from src.database.models import MatchStatus, SeasonType
 from src.data_collection.parsers import (
     PERIOD_MAP,
     SCORE_KEY_MAP,
+    parse_full_game,
     parse_period,
     safe_int,
 )
@@ -256,7 +257,6 @@ async def process_event(
     """Fetch, parse, and persist one event. Returns 'ok'|'skip'|'exists'|'error'."""
     ext_id = str(event_id)
 
-    # Fast-path: already in DB with stats
     if ext_id in existing_ids:
         return "exists"
 
@@ -268,10 +268,46 @@ async def process_event(
     if not ev or not ev.get("homeTeam"):
         return "skip"
 
-    home_raw        = ev["homeTeam"]
-    away_raw        = ev["awayTeam"]
-    home_score_raw  = ev.get("homeScore", {})
-    away_score_raw  = ev.get("awayScore", {})
+    home_raw       = ev["homeTeam"]
+    away_raw       = ev["awayTeam"]
+    home_score_raw = ev.get("homeScore", {})
+    away_score_raw = ev.get("awayScore", {})
+
+    # Fetch stats before opening DB transaction (avoids holding txn during HTTP)
+    stats = await api_get(page, f"/event/{event_id}/statistics")
+    if not stats:
+        return "skip"
+
+    # Parse per-quarter rows
+    rows: list[QuarterStatRow] = []
+    for period_data in stats.get("statistics", []):
+        label = period_data.get("period", "").upper()
+        if label == "ALL":
+            continue
+        score_key = SCORE_KEY_MAP.get(label)
+        h_score   = safe_int(home_score_raw.get(score_key)) if score_key else None
+        a_score   = safe_int(away_score_raw.get(score_key)) if score_key else None
+        row       = parse_period(label, period_data, h_score, a_score)
+        if row:
+            rows.append(row)
+
+    has_quarter_breakdown = True
+    if not rows:
+        # Fallback: use 'ALL' period stats as game-level pace proxy (e.g. EuroLeague)
+        all_data = next(
+            (pd for pd in stats.get("statistics", []) if pd.get("period", "").upper() == "ALL"),
+            None,
+        )
+        if all_data:
+            h_score = safe_int(home_score_raw.get("current"))
+            a_score = safe_int(away_score_raw.get("current"))
+            fallback = parse_full_game(all_data, h_score, a_score)
+            if fallback:
+                rows = [fallback]
+                has_quarter_breakdown = False
+
+    if not rows:
+        return "skip"
 
     def _sum_q(score: dict) -> int | None:
         vals  = [score.get(f"period{i}") for i in range(1, 5)]
@@ -290,7 +326,7 @@ async def process_event(
         datetime.fromtimestamp(ts, tz=timezone.utc)
         if ts else datetime.now(tz=timezone.utc)
     )
-    season_name  = ev.get("season", {}).get("name", "unknown")
+    season_name = ev.get("season", {}).get("name", "unknown")
 
     async with session_factory() as db:
         async with db.begin():
@@ -317,29 +353,10 @@ async def process_event(
                 home_score_regulation=_sum_q(home_score_raw),
                 away_score_regulation=_sum_q(away_score_raw),
                 went_to_overtime=went_ot,
+                has_quarter_breakdown=has_quarter_breakdown,
             )
-
-            stats = await api_get(page, f"/event/{event_id}/statistics")
-            if not stats:
-                return "skip"
-
-            rows: list[QuarterStatRow] = []
-            for period_data in stats.get("statistics", []):
-                label = period_data.get("period", "").upper()
-                if label == "ALL":
-                    continue
-                score_key = SCORE_KEY_MAP.get(label)
-                h_score   = safe_int(home_score_raw.get(score_key)) if score_key else None
-                a_score   = safe_int(away_score_raw.get(score_key)) if score_key else None
-                row       = parse_period(label, period_data, h_score, a_score)
-                if row:
-                    rows.append(row)
-
-            if not rows:
-                return "skip"
-
             await crud.save_quarter_stats(db, match.id, rows)
-            existing_ids.add(ext_id)  # update in-memory cache
+            existing_ids.add(ext_id)
 
     return "ok"
 

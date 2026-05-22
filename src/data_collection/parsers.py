@@ -71,6 +71,53 @@ def build_metrics(period_data: dict) -> dict[str, dict]:
     return m
 
 
+def parse_full_game(
+    period_data: dict,
+    home_score: int | None,
+    away_score: int | None,
+) -> QuarterStatRow | None:
+    """Parse 'ALL' full-game stats as a game-level pace proxy (EuroLeague fallback).
+
+    Returns a single QuarterStatRow with period_type=GAME, period_number=1.
+    Returns None if possession stats are unavailable.
+    """
+    m = build_metrics(period_data)
+
+    _, home_fga = parse_shot(m.get("field goals", {}).get("home", ""))
+    _, away_fga = parse_shot(m.get("field goals", {}).get("away", ""))
+    _, home_fta = parse_shot(m.get("free throws", {}).get("home", ""))
+    _, away_fta = parse_shot(m.get("free throws", {}).get("away", ""))
+    home_off = safe_int(m.get("offensive rebounds", {}).get("home"))
+    away_off = safe_int(m.get("offensive rebounds", {}).get("away"))
+    home_to  = safe_int(m.get("turnovers", {}).get("home"))
+    away_to  = safe_int(m.get("turnovers", {}).get("away"))
+
+    home_poss = _calc_possessions(home_fga or None, home_fta or None, home_off, home_to)
+    away_poss = _calc_possessions(away_fga or None, away_fta or None, away_off, away_to)
+
+    if home_poss is None and away_poss is None:
+        return None
+
+    return QuarterStatRow(
+        period_number=1,
+        period_type=PeriodType.GAME,
+        home_score=home_score,
+        away_score=away_score,
+        home_fga=home_fga or None,
+        away_fga=away_fga or None,
+        home_fta=home_fta or None,
+        away_fta=away_fta or None,
+        home_off_reb=home_off,
+        away_off_reb=away_off,
+        home_turnovers=home_to,
+        away_turnovers=away_to,
+        home_possessions=home_poss,
+        away_possessions=away_poss,
+        home_pace=_calc_pace(home_poss, PeriodType.GAME),
+        away_pace=_calc_pace(away_poss, PeriodType.GAME),
+    )
+
+
 def parse_period(
     label: str,
     period_data: dict,

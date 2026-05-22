@@ -113,6 +113,9 @@ class Match(Base):
     first_half_line: Mapped[Optional[float]] = mapped_column(Float)   # H1 total
     second_half_line: Mapped[Optional[float]] = mapped_column(Float)  # H2 total
 
+    # True if per-quarter box score is available; False for game-level fallback (e.g. EuroLeague)
+    has_quarter_breakdown: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     # --- Venue / context ---
     arena: Mapped[Optional[str]] = mapped_column(String(128))
     attendance: Mapped[Optional[int]] = mapped_column(Integer)
@@ -139,8 +142,9 @@ class Match(Base):
 # ---------------------------------------------------------------------------
 
 class PeriodType(str, enum.Enum):
-    QUARTER = "quarter"  # Q1–Q4 (regulation)
-    OVERTIME = "overtime"  # OT1, OT2, …
+    QUARTER = "quarter"   # Q1–Q4 (regulation)
+    OVERTIME = "overtime" # OT1, OT2, …
+    GAME = "game"         # full-game proxy (leagues without per-quarter stats)
 
 
 class QuarterStats(Base):
