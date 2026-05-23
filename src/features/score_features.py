@@ -1,0 +1,218 @@
+"""
+Score-based feature engineering for the per-league validation pipeline.
+
+Loads matches + quarter_stats and produces rolling L3/L5/EMA-5 score features
+plus matchup features. Used exclusively by validate_by_league.py.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+
+import pandas as pd
+from sqlalchemy import text
+
+from src.config import settings
+from src.database.engine import dispose_engine, get_session_factory
+from src.features.rolling_utils import (
+    EMA_SPAN,
+    MATCHUP_COLS,
+    ROLL_WINDOWS,
+    SCORE_STAT_COLS,
+    compute_matchup_features,
+    compute_rolling_ema,
+    fill_feature_nans,
+)
+
+log = logging.getLogger(__name__)
+
+# Extra per-team stats needed to derive matchup features
+_EXTRA_TIMELINE_COLS: tuple[str, ...] = ("win", "pace")
+_TIMELINE_STAT_COLS: tuple[str, ...] = SCORE_STAT_COLS + _EXTRA_TIMELINE_COLS
+
+TARGET = "game_total"
+
+# ── Feature column lists ──────────────────────────────────────────────────────
+
+ROLL_FEAT_COLS: list[str] = [
+    f"{side}_{stat}_{sfx}"
+    for side in ("home", "away")
+    for stat in SCORE_STAT_COLS
+    for sfx in ("L3", "L5", f"EMA{EMA_SPAN}")
+]
+CTX_COLS: list[str]  = ["home_days_rest", "away_days_rest", "is_playoff"]
+CAT_COLS: list[str]  = ["league"]
+ALL_FEAT: list[str]  = ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + CAT_COLS
+
+# ── SQL ───────────────────────────────────────────────────────────────────────
+
+_SQL_MATCHES = """
+    SELECT
+        m.id           AS match_id,
+        m.scheduled_at,
+        m.home_team_id,
+        m.away_team_id,
+        m.home_score_final,
+        m.away_score_final,
+        m.season_type::text AS season_type,
+        COALESCE(m.tournament_name, 'NBA') AS league
+    FROM matches m
+    WHERE m.home_score_final IS NOT NULL
+      AND m.away_score_final IS NOT NULL
+      AND m.has_quarter_breakdown = TRUE
+    ORDER BY m.scheduled_at
+"""
+
+_SQL_QS = """
+    SELECT match_id, period_number,
+           home_score, away_score,
+           home_pace,  away_pace
+    FROM quarter_stats
+    WHERE period_type::text = 'QUARTER'
+      AND period_number IN (1, 2, 3, 4)
+    ORDER BY match_id, period_number
+"""
+
+# ── Data loading ──────────────────────────────────────────────────────────────
+
+
+async def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    sf = get_session_factory()
+    async with sf() as db:
+        m_rows = (await db.execute(text(_SQL_MATCHES))).mappings().all()
+        q_rows = (await db.execute(text(_SQL_QS))).mappings().all()
+    await dispose_engine()
+    matches = pd.DataFrame(m_rows)
+    qs      = pd.DataFrame(q_rows)
+    matches["scheduled_at"] = pd.to_datetime(matches["scheduled_at"], utc=True)
+    log.info("Loaded %d matches, %d QS rows.", len(matches), len(qs))
+    return matches, qs
+
+
+# ── Feature engineering ───────────────────────────────────────────────────────
+
+
+def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
+    """
+    Score-based rolling L3/L5/EMA-5 + matchup features, shift-1 (no leakage).
+    NaN in first-game rows filled with column mean.
+    """
+    rest_default  = settings.features.days_rest_default
+    rest_clip_max = settings.features.days_rest_clip_max
+
+    # ── quarter scores pivot ──────────────────────────────────────────
+    wide = qs.pivot_table(
+        index="match_id",
+        columns="period_number",
+        values=["home_score", "away_score"],
+        aggfunc="first",
+    )
+    wide.columns = [
+        f"{'h' if v == 'home_score' else 'a'}_q{p}" for v, p in wide.columns
+    ]
+    wide = wide.reset_index()
+
+    pace_agg = (
+        qs.groupby("match_id")
+        .agg(match_home_pace=("home_pace", "mean"), match_away_pace=("away_pace", "mean"))
+        .reset_index()
+    )
+
+    df = matches.merge(wide, on="match_id", how="left")
+    df = df.merge(pace_agg, on="match_id", how="left")
+
+    df["game_total"] = df["home_score_final"] + df["away_score_final"]
+    df["q1_total"]   = df["h_q1"] + df["a_q1"]
+    df["h1_total"]   = (
+        df["h_q1"].fillna(0) + df["h_q2"].fillna(0) +
+        df["a_q1"].fillna(0) + df["a_q2"].fillna(0)
+    )
+
+    # ── per-team timeline ─────────────────────────────────────────────
+    home_win = (df["home_score_final"] > df["away_score_final"]).astype(float)
+    away_win = (df["away_score_final"] > df["home_score_final"]).astype(float)
+
+    home_tl = pd.DataFrame({
+        "match_id":         df["match_id"],
+        "team_id":          df["home_team_id"],
+        "scheduled_at":     df["scheduled_at"],
+        "pts_scored_q1":    df["h_q1"],
+        "pts_allowed_q1":   df["a_q1"],
+        "pts_scored_h1":    df["h_q1"].fillna(0) + df["h_q2"].fillna(0),
+        "pts_allowed_h1":   df["a_q1"].fillna(0) + df["a_q2"].fillna(0),
+        "pts_scored_game":  df["home_score_final"],
+        "pts_allowed_game": df["away_score_final"],
+        "win":              home_win,
+        "pace":             df["match_home_pace"],
+    })
+    away_tl = pd.DataFrame({
+        "match_id":         df["match_id"],
+        "team_id":          df["away_team_id"],
+        "scheduled_at":     df["scheduled_at"],
+        "pts_scored_q1":    df["a_q1"],
+        "pts_allowed_q1":   df["h_q1"],
+        "pts_scored_h1":    df["a_q1"].fillna(0) + df["a_q2"].fillna(0),
+        "pts_allowed_h1":   df["h_q1"].fillna(0) + df["h_q2"].fillna(0),
+        "pts_scored_game":  df["away_score_final"],
+        "pts_allowed_game": df["home_score_final"],
+        "win":              away_win,
+        "pace":             df["match_away_pace"],
+    })
+
+    timeline = pd.concat([home_tl, away_tl], ignore_index=True)
+    rolling  = compute_rolling_ema(timeline, stat_cols=_TIMELINE_STAT_COLS)
+
+    roll_cols = [
+        f"{col}_{sfx}"
+        for col in _TIMELINE_STAT_COLS
+        for sfx in ("L3", "L5", f"EMA{EMA_SPAN}")
+    ]
+    keep = ["match_id", "team_id"] + roll_cols
+
+    for side in ("home", "away"):
+        team_col = f"{side}_team_id"
+        side_roll = (
+            rolling
+            .merge(df[["match_id", team_col]], left_on=["match_id", "team_id"],
+                   right_on=["match_id", team_col], how="inner")[keep]
+            .rename(columns={c: f"{side}_{c}" for c in roll_cols})
+            .drop(columns="team_id")
+        )
+        df = df.merge(side_roll, on="match_id", how="left")
+
+    # ── matchup features ──────────────────────────────────────────────
+    league_avg_pace = df.groupby("league")["match_home_pace"].transform("mean")
+    df = compute_matchup_features(
+        df,
+        scored_col="pts_scored_game",
+        allowed_col="pts_allowed_game",
+        league_col="league",
+        league_avg_pace=league_avg_pace,
+    )
+
+    # ── NaN fill ──────────────────────────────────────────────────────
+    score_feat_cols = [f"{side}_{c}" for side in ("home", "away") for c in roll_cols]
+    fill_feature_nans(df, score_feat_cols + list(MATCHUP_COLS))
+
+    # ── days rest ─────────────────────────────────────────────────────
+    all_apps = pd.concat([
+        df[["match_id", "scheduled_at", "home_team_id"]].rename(columns={"home_team_id": "team_id"}),
+        df[["match_id", "scheduled_at", "away_team_id"]].rename(columns={"away_team_id": "team_id"}),
+    ]).sort_values(["team_id", "scheduled_at"])
+    all_apps["days_rest"] = all_apps.groupby("team_id")["scheduled_at"].diff().dt.days
+    all_apps["days_rest"] = all_apps["days_rest"].fillna(rest_default).clip(0, rest_clip_max)
+
+    for side in ("home", "away"):
+        team_col = f"{side}_team_id"
+        rest = (
+            all_apps
+            .merge(df[["match_id", team_col]].rename(columns={team_col: "team_id"}),
+                   on=["match_id", "team_id"])[["match_id", "days_rest"]]
+            .rename(columns={"days_rest": f"{side}_days_rest"})
+        )
+        df = df.merge(rest, on="match_id", how="left")
+
+    df["is_playoff"]     = (df["season_type"] == "playoffs").astype(int)
+    df["home_days_rest"] = df["home_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
+    df["away_days_rest"] = df["away_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
+    return df

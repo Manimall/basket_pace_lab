@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.config import settings
+
 # Stats used in score-based rolling (validate_by_league context)
 SCORE_STAT_COLS: tuple[str, ...] = (
     "pts_scored_q1",
@@ -19,11 +21,10 @@ SCORE_STAT_COLS: tuple[str, ...] = (
     "pts_allowed_game",
 )
 
-# Rolling windows and EMA span — single source of truth
-ROLL_WINDOWS: tuple[int, ...] = (3, 5)
-EMA_SPAN: int = 5
-# min_periods=1 → NaN only on a team's very first game; all later games have a value
-_MIN_PERIODS: int = 1
+# Rolling windows and EMA span — driven by config, exported for callers
+ROLL_WINDOWS: tuple[int, ...] = settings.features.score_roll_windows
+EMA_SPAN: int = settings.features.ema_span
+_MIN_PERIODS: int = settings.features.min_periods
 
 
 def compute_rolling_ema(
