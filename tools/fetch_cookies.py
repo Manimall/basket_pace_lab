@@ -14,7 +14,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-COOKIES_PATH = Path(__file__).parent / "cookies.json"
+COOKIES_PATH = Path(__file__).parent.parent / "cookies.json"
 TARGET_URL = "https://www.sofascore.com/basketball"
 WAIT_SEC = 8
 

@@ -53,6 +53,23 @@ class ModelConfig(BaseSettings):
     min_test_rows: int = 20
 
 
+class CollectorConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Playwright request delays (seconds)
+    delay_min: float = 2.0
+    delay_max: float = 5.0
+    season_pause_sec: float = 10.0
+    # Collection limits
+    max_pages: int = 50
+    default_pages: int = 5
+    # Sofascore defaults (NBA 25/26)
+    default_tournament_id: int = 132
+    default_season_id: int = 80229
+    match_threshold: float = 0.40     # min name-similarity for Flashscore matching
+    show_more_delay: float = 1.2      # seconds to wait after each "show more" click
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -60,6 +77,7 @@ class Settings(BaseSettings):
     app: AppSettings = AppSettings()
     features: FeatureConfig = FeatureConfig()
     model: ModelConfig = ModelConfig()
+    collector: CollectorConfig = CollectorConfig()
 
 
 settings = Settings()
