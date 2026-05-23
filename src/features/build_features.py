@@ -34,6 +34,7 @@ from sqlalchemy import text
 
 from src.data_collection.sofascore_client import FTA_TO_POSS_FACTOR  # noqa: F401 — re-exported for notebooks
 from src.database.engine import get_session_factory
+from src.features.rolling_utils import MATCHUP_COLS, compute_matchup_features
 
 # Rolling windows (last N games before the match)
 _WINDOWS: tuple[int, ...] = (3, 5, 10)
@@ -46,6 +47,9 @@ _ROLL_STATS: tuple[str, ...] = (
     "to_rate",
     "oreb_rate",
     "pts_per_poss",
+    "pts_scored",   # raw points for attack/defense strength matchup features
+    "pts_allowed",  # raw points conceded
+    "win",          # 1/0 outcome for win-rate rolling
 )
 
 # NBA 25/26 playoff start date (used to derive is_playoff since
@@ -85,7 +89,8 @@ class BasketballFeatureBuilder:
                         m.away_score_final,
                         m.went_to_overtime,
                         m.season,
-                        m.has_quarter_breakdown
+                        m.has_quarter_breakdown,
+                        COALESCE(m.tournament_name, 'NBA') AS tournament_name
                     FROM matches m
                     JOIN teams ht ON ht.id = m.home_team_id
                     JOIN teams at ON at.id = m.away_team_id
@@ -236,6 +241,14 @@ class BasketballFeatureBuilder:
         df["home_opp_pace"] = df["away_pace"]
         df["away_opp_pace"] = df["home_pace"]
 
+        # Raw scoring stats for attack/defense strength matchup features
+        df["home_pts_scored"]  = df["home_score_final"]
+        df["away_pts_scored"]  = df["away_score_final"]
+        df["home_pts_allowed"] = df["away_score_final"]
+        df["away_pts_allowed"] = df["home_score_final"]
+        df["home_win"] = (df["home_score_final"] > df["away_score_final"]).astype(float)
+        df["away_win"] = (df["away_score_final"] > df["home_score_final"]).astype(float)
+
         # Drop temporary fallback columns
         fb_cols = [c for c in df.columns if c.endswith("_fb")]
         if fb_cols:
@@ -361,6 +374,16 @@ class BasketballFeatureBuilder:
         timeline = self._build_timelines(df)
         rolling = self._calc_rolling(timeline)
         df = self._join_rolling(df, rolling)
+
+        # Matchup features (opponent-aware)
+        league_avg_pace = df.groupby("tournament_name")["home_pace"].transform("mean")
+        df = compute_matchup_features(
+            df,
+            scored_col="pts_scored",
+            allowed_col="pts_allowed",
+            league_col="tournament_name",
+            league_avg_pace=league_avg_pace,
+        )
         return df
 
     def build(self) -> pd.DataFrame:
@@ -373,10 +396,11 @@ class BasketballFeatureBuilder:
 
     @staticmethod
     def get_feature_columns(df: pd.DataFrame) -> list[str]:
-        """All input feature columns (rolling + context)."""
-        roll = [c for c in df.columns if "_L3" in c or "_L5" in c or "_L10" in c]
-        ctx  = ["is_playoff", "home_days_rest", "away_days_rest", "has_quarter_breakdown"]
-        return roll + [c for c in ctx if c in df.columns]
+        """All input feature columns (rolling + matchup + context)."""
+        roll    = [c for c in df.columns if "_L3" in c or "_L5" in c or "_L10" in c]
+        matchup = [c for c in MATCHUP_COLS if c in df.columns]
+        ctx     = ["is_playoff", "home_days_rest", "away_days_rest", "has_quarter_breakdown"]
+        return roll + matchup + [c for c in ctx if c in df.columns]
 
     @staticmethod
     def get_target_columns() -> dict[str, list[str]]:

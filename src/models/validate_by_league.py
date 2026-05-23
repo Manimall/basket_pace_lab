@@ -3,7 +3,8 @@ Per-league cross-validation for game_total prediction.
 
 Features
 --------
-  Rolling L3 / L5 and EMA-5 of score-based per-team stats (shift-1, no leakage).
+  Rolling L3 / L5 / EMA-5 of score-based per-team stats (shift-1, no leakage).
+  Matchup features: attack/defense strength ratios, win_rate_diff, expected_pace.
   NaN from a team's first game is filled with the column global mean.
 
 Split
@@ -11,10 +12,6 @@ Split
   Chronological: last 20% of each league = test; rest = global train.
   One global CatBoostRegressor trained on all-league training data.
   Baseline: per-league mean game_total (naive predictor).
-
-Output
-------
-  League | N | MAE | RMSE | Baseline MAE | Δ vs base | AvgQ1
 
 Run:
     python -m src.models.validate_by_league
@@ -31,7 +28,10 @@ from sqlalchemy import text
 
 from src.database.engine import dispose_engine, get_session_factory
 from src.features.rolling_utils import (
+    EMA_SPAN,
+    MATCHUP_COLS,
     SCORE_STAT_COLS,
+    compute_matchup_features,
     compute_rolling_ema,
     fill_feature_nans,
 )
@@ -44,6 +44,11 @@ MIN_TEST  = 20
 
 _REST_CLIP_MAX = 21
 _REST_DEFAULT  = 7
+
+# Stats added to team timeline beyond SCORE_STAT_COLS (used only as intermediates
+# to derive matchup features; not added directly to ALL_FEAT)
+_EXTRA_TIMELINE_COLS: tuple[str, ...] = ("win", "pace")
+_TIMELINE_STAT_COLS: tuple[str, ...] = SCORE_STAT_COLS + _EXTRA_TIMELINE_COLS
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
@@ -65,7 +70,9 @@ _SQL_MATCHES = """
 """
 
 _SQL_QS = """
-    SELECT match_id, period_number, home_score, away_score
+    SELECT match_id, period_number,
+           home_score, away_score,
+           home_pace,  away_pace
     FROM quarter_stats
     WHERE period_type::text = 'QUARTER'
       AND period_number IN (1, 2, 3, 4)
@@ -92,9 +99,10 @@ async def _load() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def _build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     """
-    Score-based rolling L3/L5 and EMA-5 per team, shift-1 (no leakage).
+    Score-based rolling L3/L5/EMA-5 + matchup features, shift-1 (no leakage).
     NaN in first-game rows filled with column mean.
     """
+    # ── quarter scores pivot ──────────────────────────────────────────────────
     wide = (
         qs.pivot_table(
             index="match_id",
@@ -108,14 +116,27 @@ def _build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     ]
     wide = wide.reset_index()
 
+    # per-match average pace (mean across quarters, NULL where not available)
+    pace_agg = (
+        qs.groupby("match_id")
+        .agg(match_home_pace=("home_pace", "mean"), match_away_pace=("away_pace", "mean"))
+        .reset_index()
+    )
+
     df = matches.merge(wide, on="match_id", how="left")
+    df = df.merge(pace_agg, on="match_id", how="left")
+
     df["game_total"] = df["home_score_final"] + df["away_score_final"]
     df["q1_total"]   = df["h_q1"] + df["a_q1"]
     # h_q2/a_q2 always present: SQL filters has_quarter_breakdown=TRUE
-    df["h1_total"]   = (
+    df["h1_total"] = (
         df["h_q1"].fillna(0) + df["h_q2"].fillna(0) +
         df["a_q1"].fillna(0) + df["a_q2"].fillna(0)
     )
+
+    # ── per-team timeline ─────────────────────────────────────────────────────
+    home_win = (df["home_score_final"] > df["away_score_final"]).astype(float)
+    away_win = (df["away_score_final"] > df["home_score_final"]).astype(float)
 
     home_tl = pd.DataFrame({
         "match_id":         df["match_id"],
@@ -127,6 +148,8 @@ def _build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
         "pts_allowed_h1":   df["a_q1"].fillna(0) + df["a_q2"].fillna(0),
         "pts_scored_game":  df["home_score_final"],
         "pts_allowed_game": df["away_score_final"],
+        "win":              home_win,
+        "pace":             df["match_home_pace"],
     })
     away_tl = pd.DataFrame({
         "match_id":         df["match_id"],
@@ -138,15 +161,17 @@ def _build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
         "pts_allowed_h1":   df["h_q1"].fillna(0) + df["h_q2"].fillna(0),
         "pts_scored_game":  df["away_score_final"],
         "pts_allowed_game": df["home_score_final"],
+        "win":              away_win,
+        "pace":             df["match_away_pace"],
     })
 
     timeline = pd.concat([home_tl, away_tl], ignore_index=True)
-    rolling  = compute_rolling_ema(timeline)
+    rolling  = compute_rolling_ema(timeline, stat_cols=_TIMELINE_STAT_COLS)
 
     roll_cols = [
         f"{col}_{sfx}"
-        for col in SCORE_STAT_COLS
-        for sfx in ("L3", "L5", f"EMA{5}")
+        for col in _TIMELINE_STAT_COLS
+        for sfx in ("L3", "L5", f"EMA{EMA_SPAN}")
     ]
     keep = ["match_id", "team_id"] + roll_cols
 
@@ -161,8 +186,20 @@ def _build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
         )
         df = df.merge(side_roll, on="match_id", how="left")
 
-    feat_cols = [f"{side}_{c}" for side in ("home", "away") for c in roll_cols]
-    fill_feature_nans(df, feat_cols)
+    # ── matchup features ──────────────────────────────────────────────────────
+    # league_avg_pace from raw per-match pace (not rolled) to avoid circularity
+    league_avg_pace = df.groupby("league")["match_home_pace"].transform("mean")
+    df = compute_matchup_features(
+        df,
+        scored_col="pts_scored_game",
+        allowed_col="pts_allowed_game",
+        league_col="league",
+        league_avg_pace=league_avg_pace,
+    )
+
+    # ── NaN fill ──────────────────────────────────────────────────────────────
+    score_feat_cols = [f"{side}_{c}" for side in ("home", "away") for c in roll_cols]
+    fill_feature_nans(df, score_feat_cols + list(MATCHUP_COLS))
 
     # ── days rest ─────────────────────────────────────────────────────────────
     all_apps = pd.concat([
@@ -182,27 +219,29 @@ def _build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
         )
         df = df.merge(rest, on="match_id", how="left")
 
-    df["is_playoff"]      = (df["season_type"] == "playoffs").astype(int)
-    df["home_days_rest"]  = df["home_days_rest"].fillna(_REST_DEFAULT).clip(0, _REST_CLIP_MAX)
-    df["away_days_rest"]  = df["away_days_rest"].fillna(_REST_DEFAULT).clip(0, _REST_CLIP_MAX)
+    df["is_playoff"]     = (df["season_type"] == "playoffs").astype(int)
+    df["home_days_rest"] = df["home_days_rest"].fillna(_REST_DEFAULT).clip(0, _REST_CLIP_MAX)
+    df["away_days_rest"] = df["away_days_rest"].fillna(_REST_DEFAULT).clip(0, _REST_CLIP_MAX)
     return df
 
 
 # ── Feature / target selection ────────────────────────────────────────────────
 
+# Score-based rolling features (direct model inputs)
 ROLL_FEAT_COLS = [
     f"{side}_{stat}_{sfx}"
     for side in ("home", "away")
     for stat in SCORE_STAT_COLS
-    for sfx in ("L3", "L5", "EMA5")
+    for sfx in ("L3", "L5", f"EMA{EMA_SPAN}")
 ]
 CTX_COLS  = ["home_days_rest", "away_days_rest", "is_playoff"]
 CAT_COLS  = ["league"]
-ALL_FEAT  = ROLL_FEAT_COLS + CTX_COLS + CAT_COLS
+ALL_FEAT  = ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + CAT_COLS
 
 
 def _get_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    X = df[ALL_FEAT].copy()
+    feat_cols = [c for c in ALL_FEAT if c in df.columns]
+    X = df[feat_cols].copy()
     X["league"] = X["league"].astype(str)
     return X, df[TARGET]
 
@@ -289,9 +328,10 @@ def main() -> None:
     matches, qs = asyncio.run(_load())
     print(f"  Matches: {len(matches):,}  |  QuarterStats rows: {len(qs):,}")
 
-    print("Building rolling L3/L5/EMA-5 features…")
+    print("Building features (rolling L3/L5/EMA-5 + matchup)…")
     df = _build_features(matches, qs).dropna(subset=[TARGET]).reset_index(drop=True)
-    print(f"  Feature rows: {len(df):,}  |  Features: {len(ALL_FEAT)}")
+    feat_cols = [c for c in ALL_FEAT if c in df.columns]
+    print(f"  Feature rows: {len(df):,}  |  Features: {len(feat_cols)}")
 
     print("Splitting per-league (last 20% = test)…")
     train_df, test_dict = _chrono_split(df)
@@ -314,22 +354,23 @@ def main() -> None:
         baseline_mean = train_league[TARGET].mean() if len(train_league) > 0 else test_df[TARGET].mean()
         baseline_mae, _ = _metrics(y_te.values, np.full(len(y_te), baseline_mean))
 
+        avg_q1 = test_df["q1_total"].mean()
         result_rows.append({
             "league":       league,
             "n":            len(test_df),
             "mae":          mae,
             "rmse":         rmse,
             "baseline_mae": baseline_mae,
-            "avg_q1":       test_df["q1_total"].mean() if pd.notna(test_df["q1_total"].mean()) else 0.0,
+            "avg_q1":       avg_q1 if pd.notna(avg_q1) else 0.0,
         })
 
     _print_table(result_rows)
 
     feat_imp = pd.DataFrame({
-        "feature":    ALL_FEAT,
+        "feature":    feat_cols,
         "importance": model.get_feature_importance(),
-    }).sort_values("importance", ascending=False).head(12)
-    print("Top-12 Feature Importances:")
+    }).sort_values("importance", ascending=False).head(15)
+    print("Top-15 Feature Importances:")
     for _, row in feat_imp.iterrows():
         bar = "█" * int(row["importance"] / feat_imp["importance"].max() * 25)
         print(f"  {row['feature']:<45s} {row['importance']:5.1f}%  {bar}")

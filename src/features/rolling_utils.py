@@ -64,3 +64,60 @@ def fill_feature_nans(df: pd.DataFrame, feat_cols: list[str]) -> pd.DataFrame:
         if col in df.columns and df[col].isna().any():
             df[col] = df[col].fillna(df[col].mean())
     return df
+
+
+# Matchup feature column names — single source of truth for both pipelines
+MATCHUP_COLS: tuple[str, ...] = (
+    "home_attack_strength",
+    "away_attack_strength",
+    "home_defense_strength",
+    "away_defense_strength",
+    "win_rate_diff_L5",
+    "expected_matchup_pace",
+)
+
+
+def compute_matchup_features(
+    df: pd.DataFrame,
+    scored_col: str = "pts_scored_game",
+    allowed_col: str = "pts_allowed_game",
+    league_col: str = "league",
+    league_avg_pace: pd.Series | None = None,
+) -> pd.DataFrame:
+    """
+    Add opponent-aware matchup features to a match-level DataFrame.
+
+    Requires columns already present in df (after rolling join, shift-1 applied):
+      home/away_{scored_col}_L5    — rolling pts scored (attack proxy)
+      home/away_{allowed_col}_L5   — rolling pts allowed (defense proxy)
+      home_score_final, away_score_final  — used to compute league avg scoring
+      home_win_L5, away_win_L5     — optional; enables win_rate_diff_L5
+      home_pace_L5, away_pace_L5   — optional; enables expected_matchup_pace
+
+    Args:
+        league_avg_pace: pre-computed per-row league average pace (from raw pace
+            column, not rolled). Pass None to skip expected_matchup_pace.
+    """
+    pts = pd.concat([
+        df[[league_col, "home_score_final"]].rename(columns={"home_score_final": "pts"}),
+        df[[league_col, "away_score_final"]].rename(columns={"away_score_final": "pts"}),
+    ])
+    avg_pts = df[league_col].map(pts.groupby(league_col)["pts"].mean())
+
+    df["home_attack_strength"]  = df[f"home_{scored_col}_L5"]  / avg_pts
+    df["away_attack_strength"]  = df[f"away_{scored_col}_L5"]  / avg_pts
+    df["home_defense_strength"] = df[f"home_{allowed_col}_L5"] / avg_pts
+    df["away_defense_strength"] = df[f"away_{allowed_col}_L5"] / avg_pts
+
+    if {"home_win_L5", "away_win_L5"}.issubset(df.columns):
+        df["win_rate_diff_L5"] = df["home_win_L5"] - df["away_win_L5"]
+
+    if (
+        league_avg_pace is not None
+        and {"home_pace_L5", "away_pace_L5"}.issubset(df.columns)
+    ):
+        df["expected_matchup_pace"] = (
+            df["home_pace_L5"] + df["away_pace_L5"] - league_avg_pace
+        )
+
+    return df
