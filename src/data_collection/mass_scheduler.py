@@ -130,11 +130,9 @@ LEAGUE_CATALOG: dict[str, dict] = {
     "LNB": {
         "tournament_id": 156,
         "seasons": [
-            # LNB Élite (top French Pro A league)
-            # Season IDs fetched from /seasons endpoint
-            {"id": 79227, "name": "Pro A 25/26", "code": "2526"},
-            {"id": 63977, "name": "Pro A 24/25", "code": "2425"},
-            {"id": 53369, "name": "Pro A 23/24", "code": "2324"},
+            {"id": 79100, "name": "Pro A 25/26", "code": "2526"},
+            {"id": 64004, "name": "Pro A 24/25", "code": "2425"},
+            {"id": 53266, "name": "Pro A 23/24", "code": "2324"},
         ],
     },
     "NBL": {
@@ -156,8 +154,9 @@ LEAGUE_CATALOG: dict[str, dict] = {
     "ChinaNBL": {
         "tournament_id": 27568,
         "seasons": [
-            # China second division — season IDs TBD (verify before running)
-            # {"id": ???, "name": "NBL 25/26", "code": "2526"},
+            {"id": 87684, "name": "NBL 25/26", "code": "2526"},
+            {"id": 77353, "name": "NBL 2025",  "code": "2425"},
+            # 23/24 season not present on Sofascore
         ],
     },
     "PBA_Phil": {
@@ -179,6 +178,7 @@ LEAGUE_CATALOG: dict[str, dict] = {
     "PBA_Gov": {
         "tournament_id": 1712,
         "seasons": [
+            # 25/26 not yet on Sofascore (season hasn't started)
             {"id": 65381, "name": "PBA Governors Cup 2024", "code": "2425"},
             {"id": 48362, "name": "PBA Governors Cup 22/23", "code": "2324"},
         ],

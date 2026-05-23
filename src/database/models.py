@@ -115,6 +115,8 @@ class Match(Base):
 
     # True if per-quarter box score is available; False for game-level fallback (e.g. EuroLeague)
     has_quarter_breakdown: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Flashscore match ID — set when quarter data was sourced from Flashscore
+    flashscore_id: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
 
     # --- Venue / context ---
     arena: Mapped[Optional[str]] = mapped_column(String(128))
