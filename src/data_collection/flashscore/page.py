@@ -78,11 +78,24 @@ _JS_EXTRACT_MATCHES = r"""
 """
 
 
-def _parse_fs_date(time_str: str) -> date | None:
+def _parse_fs_date(
+    time_str: str,
+    season_years: tuple[int, int] | None = None,
+) -> date | None:
     m = re.match(r"(\d{1,2})\.(\d{1,2})\.", time_str.strip())
     if not m:
         return None
     day, month = int(m.group(1)), int(m.group(2))
+
+    if season_years:
+        # Sports seasons span two calendar years: months Jul-Dec belong to year[0],
+        # months Jan-Jun belong to year[1].
+        year = season_years[0] if month >= 7 else season_years[1]
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+
     today = date.today()
     best: date | None = None
     for year in [today.year, today.year - 1]:
@@ -96,11 +109,25 @@ def _parse_fs_date(time_str: str) -> date | None:
     return best
 
 
-async def build_league_index(page: Page, league_key: str) -> list[FsMatch]:
-    path = LEAGUE_PATHS[league_key]
-    url  = FLASHSCORE_BASE_URL + path + "results/"
+def _infer_season_years(url: str) -> tuple[int, int] | None:
+    """Extract (year1, year2) from URLs like '.../nba-2024-2025/...'."""
+    m = re.search(r"-(\d{4})-(\d{4})/", url)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+async def build_index_from_url(page: Page, url: str) -> list[FsMatch]:
+    """Build a Flashscore match index from an arbitrary results page URL.
+
+    Returns an empty list (with a warning) if the page fails to load.
+    """
     log.info("  Building index: %s", url)
-    await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+    except Exception as exc:
+        log.warning("  Failed to load %s: %s", url, exc)
+        return []
     await asyncio.sleep(2)
 
     clicks = 0
@@ -119,13 +146,14 @@ async def build_league_index(page: Page, league_key: str) -> list[FsMatch]:
     raw_rows: list[dict[str, Any]] = await page.evaluate(_JS_EXTRACT_MATCHES)
     log.info("  Raw rows from JS: %d", len(raw_rows))
 
+    season_years = _infer_season_years(url)
     entries: list[FsMatch] = []
     for r in raw_rows:
         if not r.get("fsId"):
             continue
         entries.append(FsMatch(
             fs_id=r["fsId"], date_str=r["timeStr"],
-            match_date=_parse_fs_date(r["timeStr"]),
+            match_date=_parse_fs_date(r["timeStr"], season_years),
             home_raw=r["home"], away_raw=r["away"],
             home_norm=_norm(r["home"]), away_norm=_norm(r["away"]),
             q_scores=[(q[0], q[1]) for q in r["qScores"]],
@@ -136,7 +164,20 @@ async def build_league_index(page: Page, league_key: str) -> list[FsMatch]:
     return entries
 
 
-def find_match(index: list[FsMatch], target_date: date, home_name: str, away_name: str) -> FsMatch | None:
+async def build_league_index(page: Page, league_key: str) -> list[FsMatch]:
+    """Build index for a known league key (looks up URL from LEAGUE_PATHS)."""
+    path = LEAGUE_PATHS[league_key]
+    return await build_index_from_url(page, FLASHSCORE_BASE_URL + path + "results/")
+
+
+def find_match(
+    index: list[FsMatch],
+    target_date: date,
+    home_name: str,
+    away_name: str,
+    threshold: float | None = None,
+) -> FsMatch | None:
+    thr = threshold if threshold is not None else settings.collector.match_threshold
     h_norm, a_norm = _norm(home_name), _norm(away_name)
     best: FsMatch | None = None
     best_score = 0.0
@@ -146,7 +187,7 @@ def find_match(index: list[FsMatch], target_date: date, home_name: str, away_nam
         combined = (_sim(h_norm, entry.home_norm) + _sim(a_norm, entry.away_norm)) / 2
         if combined > best_score:
             best_score, best = combined, entry
-    return best if best_score >= settings.collector.match_threshold else None
+    return best if best_score >= thr else None
 
 
 def build_quarter_rows(fs_match: FsMatch) -> list[QuarterStatRow] | None:

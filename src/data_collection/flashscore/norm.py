@@ -42,6 +42,8 @@ _NAME_ALIASES: dict[str, str] = {
     "partizan":                  "partizan mozzart bet",
     "nanjing monkey kings":      "nanjing tongxi",
     "zhejiang golden bulls":     "zhejiang guangsha",
+    # LNBP: team renamed Plateros de Fresnillo → Gambusinos (Flashscore uses new name)
+    "plateros de fresnillo":     "gambusinos",
 }
 
 # Applied before _STOP — expand abbreviated city prefixes used by Flashscore NBA

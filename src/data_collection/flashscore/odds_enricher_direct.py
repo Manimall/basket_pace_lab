@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import sys
 import time
 from dataclasses import dataclass
@@ -34,10 +33,9 @@ from sqlalchemy import text
 
 from src.config import settings
 from src.data_collection.base import BaseCollector
-from src.data_collection.constants import FLASHSCORE_BASE_URL, USER_AGENTS
-from src.data_collection.flashscore.odds import (
-    OddsRow, dismiss_overlays, scrape_match_odds,
-)
+from src.data_collection.constants import FLASHSCORE_BASE_URL
+from src.data_collection.flashscore.browser import make_flashscore_session
+from src.data_collection.flashscore.odds import OddsRow, scrape_match_odds
 from src.database.engine import dispose_engine, get_session_factory
 
 log = logging.getLogger("odds_enricher_direct")
@@ -158,62 +156,51 @@ class DirectOddsEnricher(BaseCollector):
             log.info("  [dry] Total: %d", len(targets))
             return
 
+        ok = noodds = err = 0
+        t0 = time.monotonic()
+
         async with async_playwright() as pw:
-            browser   = await pw.chromium.launch(headless=True)
-            ua        = random.choice(USER_AGENTS)
-            ctx       = await browser.new_context(user_agent=ua)
-            odds_page = await ctx.new_page()
-
-            log.info("Warming up session on Flashscore (UA: %s…)", ua[:45])
-            await odds_page.goto(
-                FLASHSCORE_BASE_URL + "/basketball/",
-                wait_until="domcontentloaded", timeout=20_000,
-            )
-            await asyncio.sleep(3)
-            await dismiss_overlays(odds_page)
-
-            ok = noodds = err = 0
-            t0 = time.monotonic()
-
-            for i, target in enumerate(targets, 1):
-                match_url = f"{FLASHSCORE_BASE_URL}/match/{target.flashscore_id}/"
-                try:
-                    odds = await scrape_match_odds(
-                        odds_page, target.flashscore_id, match_url,
-                    )
-                    if odds is None:
-                        noodds += 1
-                        log.debug(
-                            "  noodds [%s] %s vs %s",
-                            target.flashscore_id, target.home_team, target.away_team,
+            browser, odds_page = await make_flashscore_session(pw)
+            try:
+                for i, target in enumerate(targets, 1):
+                    match_url = f"{FLASHSCORE_BASE_URL}/match/{target.flashscore_id}/"
+                    try:
+                        odds = await scrape_match_odds(
+                            odds_page, target.flashscore_id, match_url,
                         )
-                    else:
-                        await _save_odds(self._sf, target.match_id, odds)
-                        log.debug(
-                            "  ok [%s] %s vs %s → close=%.1f bm=%s",
+                        if odds is None:
+                            noodds += 1
+                            log.debug(
+                                "  noodds [%s] %s vs %s",
+                                target.flashscore_id, target.home_team, target.away_team,
+                            )
+                        else:
+                            await _save_odds(self._sf, target.match_id, odds)
+                            log.debug(
+                                "  ok [%s] %s vs %s → close=%.1f bm=%s",
+                                target.flashscore_id, target.home_team, target.away_team,
+                                odds.total_close or 0.0, odds.bookmaker,
+                            )
+                            ok += 1
+                    except Exception as exc:
+                        log.warning(
+                            "  err [%s] %s vs %s → %s",
                             target.flashscore_id, target.home_team, target.away_team,
-                            odds.total_close or 0.0, odds.bookmaker,
+                            str(exc)[:120],
                         )
-                        ok += 1
-                except Exception as exc:
-                    log.warning(
-                        "  err [%s] %s vs %s → %s",
-                        target.flashscore_id, target.home_team, target.away_team,
-                        str(exc)[:120],
-                    )
-                    err += 1
+                        err += 1
 
-                if i % 25 == 0 or i == len(targets):
-                    elapsed = time.monotonic() - t0
-                    rate    = i / elapsed if elapsed > 0 else 0
-                    eta_min = (len(targets) - i) / rate / 60 if rate > 0 else 0
-                    log.info(
-                        "%d/%d | ok=%d noodds=%d err=%d | %.0fs | ETA ~%.0f min",
-                        i, len(targets), ok, noodds, err, elapsed, eta_min,
-                    )
-                await asyncio.sleep(settings.collector.delay_min)
-
-            await browser.close()
+                    if i % 25 == 0 or i == len(targets):
+                        elapsed = time.monotonic() - t0
+                        rate    = i / elapsed if elapsed > 0 else 0
+                        eta_min = (len(targets) - i) / rate / 60 if rate > 0 else 0
+                        log.info(
+                            "%d/%d | ok=%d noodds=%d err=%d | %.0fs | ETA ~%.0f min",
+                            i, len(targets), ok, noodds, err, elapsed, eta_min,
+                        )
+                    await asyncio.sleep(settings.collector.delay_min)
+            finally:
+                await browser.close()
 
         log.info("━" * 60)
         log.info(
