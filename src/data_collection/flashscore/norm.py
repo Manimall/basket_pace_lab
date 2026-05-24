@@ -18,7 +18,12 @@ _STOP = re.compile(
     r"telekom|ewe|fraport|skyliners|mhp|mlp|ratiopharm|"
     r"fitness|first|gladiators|towers|seawolves|riesen|lowen|lions|"
     r"academics|bv|rasta|"
-    r"ea7|emporio|armani|ldlc|beko|meridianbet|mozzart|bet)\b",
+    r"ea7|emporio|armani|ldlc|beko|meridianbet|mozzart|bet|"
+    # NBA team nicknames — stripped so city name alone matches full name
+    r"celtics|nets|knicks|76ers|raptors|bulls|cavaliers|pistons|pacers|"
+    r"bucks|hawks|hornets|heat|magic|wizards|nuggets|timberwolves|thunder|"
+    r"trail|blazers|jazz|warriors|clippers|lakers|suns|kings|mavericks|"
+    r"rockets|grizzlies|pelicans|spurs|hawks)\b",
     re.IGNORECASE,
 )
 _PUNCT       = re.compile(r"[^a-z0-9 ]")
@@ -37,7 +42,14 @@ _NAME_ALIASES: dict[str, str] = {
     "partizan":                  "partizan mozzart bet",
     "nanjing monkey kings":      "nanjing tongxi",
     "zhejiang golden bulls":     "zhejiang guangsha",
+    # LNBP: team renamed Plateros de Fresnillo → Gambusinos (Flashscore uses new name)
+    "plateros de fresnillo":     "gambusinos",
 }
+
+# Applied before _STOP — expand abbreviated city prefixes used by Flashscore NBA
+_EXPAND: list[tuple[str, str]] = [
+    (r"\bla\b", "los angeles"),
+]
 
 
 def _norm(name: str) -> str:
@@ -48,6 +60,8 @@ def _norm(name: str) -> str:
         name = _NAME_ALIASES[name]
     for compound, expanded in _SPLIT_COMPOUNDS:
         name = name.replace(compound, expanded)
+    for pattern, replacement in _EXPAND:
+        name = re.sub(pattern, replacement, name)
     name = _STOP.sub(" ", name)
     name = _DIGITS_ONLY.sub(" ", name)
     name = _PUNCT.sub(" ", name)

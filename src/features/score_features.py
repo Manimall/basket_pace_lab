@@ -42,7 +42,11 @@ ROLL_FEAT_COLS: list[str] = [
 ]
 CTX_COLS: list[str]  = ["home_days_rest", "away_days_rest", "is_playoff"]
 CAT_COLS: list[str]  = ["league"]
-ALL_FEAT: list[str]  = ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + CAT_COLS
+# Bookmaker signal features (populated when total_line is available).
+# line_movement dropped: Flashscore API doesn't expose opening line,
+# so total_line_open is always NULL → feature would be 100% NaN.
+BM_COLS: list[str]   = ["bookmaker_total_closing", "market_vs_history_delta"]
+ALL_FEAT: list[str]  = ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + BM_COLS + CAT_COLS
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
@@ -55,7 +59,9 @@ _SQL_MATCHES = """
         m.home_score_final,
         m.away_score_final,
         m.season_type::text AS season_type,
-        COALESCE(m.tournament_name, 'NBA') AS league
+        COALESCE(m.tournament_name, 'NBA') AS league,
+        m.total_line,
+        m.total_line_open
     FROM matches m
     WHERE m.home_score_final IS NOT NULL
       AND m.away_score_final IS NOT NULL
@@ -215,4 +221,23 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     df["is_playoff"]     = (df["season_type"] == "playoffs").astype(int)
     df["home_days_rest"] = df["home_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
     df["away_days_rest"] = df["away_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
+
+    # ── Bookmaker signal features ─────────────────────────────────────
+    # total_line = closing O/U line (NaN for matches without odds data)
+    df["bookmaker_total_closing"] = df["total_line"]
+
+    # line_movement > 0 means market moved the total UP (sharp money on Over)
+    # NaN when opening line is unavailable (older data or source didn't provide it)
+    df["line_movement"] = df["total_line"] - df["total_line_open"]
+
+    # market_vs_history_delta: form-based expected total minus market expectation.
+    # Positive = teams are scoring more than the market expects (Over lean).
+    # Negative = teams are scoring less (Under lean).
+    h_scored_l5 = df.get("home_pts_scored_game_L5")
+    a_scored_l5 = df.get("away_pts_scored_game_L5")
+    if h_scored_l5 is not None and a_scored_l5 is not None:
+        df["market_vs_history_delta"] = (h_scored_l5 + a_scored_l5) - df["total_line"]
+    else:
+        df["market_vs_history_delta"] = float("nan")
+
     return df

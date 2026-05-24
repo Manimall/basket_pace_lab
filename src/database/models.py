@@ -109,7 +109,10 @@ class Match(Base):
     overtime_periods_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
 
     # --- Betting lines (pre-match) ---
-    total_line: Mapped[Optional[float]] = mapped_column(Float)        # match total
+    total_line: Mapped[Optional[float]] = mapped_column(Float)        # closing O/U line (primary ML feature)
+    total_line_open: Mapped[Optional[float]] = mapped_column(Float)   # opening O/U line (line movement signal)
+    total_line_source: Mapped[Optional[str]] = mapped_column(String(32))  # bookmaker: "pinnacle" | "bet365" | …
+    total_line_scraped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     first_half_line: Mapped[Optional[float]] = mapped_column(Float)   # H1 total
     second_half_line: Mapped[Optional[float]] = mapped_column(Float)  # H2 total
 
