@@ -174,16 +174,19 @@ async def dismiss_overlays(page: Page) -> None:
         (clicking its confirm button may trigger a locale redirect)
       - OneTrust GDPR consent banner — accepted via JS click (safe, no redirect)
     """
-    await page.evaluate("""() => {
-        // Language/region dialog and GDPR overlay — make non-interactive without
-        // touching React state (removing nodes breaks SPA routing).
-        document.querySelectorAll(
-            '[data-testid="wcl-dialog-wrapper"], [data-testid="wcl-dialog-overlay"], #onetrust-consent-sdk'
-        ).forEach(el => {
-            el.style.pointerEvents = 'none';
-            el.style.display = 'none';
-        });
-    }""")
+    try:
+        await page.evaluate("""() => {
+            // Language/region dialog and GDPR overlay — make non-interactive without
+            // touching React state (removing nodes breaks SPA routing).
+            document.querySelectorAll(
+                '[data-testid="wcl-dialog-wrapper"], [data-testid="wcl-dialog-overlay"], #onetrust-consent-sdk'
+            ).forEach(el => {
+                el.style.pointerEvents = 'none';
+                el.style.display = 'none';
+            });
+        }""")
+    except Exception:
+        pass  # page may be mid-navigation; overlay dismissal is best-effort
     await asyncio.sleep(0.2)
 
 
