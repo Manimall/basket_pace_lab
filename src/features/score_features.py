@@ -42,8 +42,10 @@ ROLL_FEAT_COLS: list[str] = [
 ]
 CTX_COLS: list[str]  = ["home_days_rest", "away_days_rest", "is_playoff"]
 CAT_COLS: list[str]  = ["league"]
-# Bookmaker signal features (populated when total_line is available)
-BM_COLS: list[str]   = ["bookmaker_total_closing", "line_movement", "market_vs_history_delta"]
+# Bookmaker signal features (populated when total_line is available).
+# line_movement dropped: Flashscore API doesn't expose opening line,
+# so total_line_open is always NULL → feature would be 100% NaN.
+BM_COLS: list[str]   = ["bookmaker_total_closing", "market_vs_history_delta"]
 ALL_FEAT: list[str]  = ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + BM_COLS + CAT_COLS
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
