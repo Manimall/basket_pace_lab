@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 # tournament_name (DB) → Flashscore URL path
 LEAGUE_PATHS: dict[str, str] = {
+    "NBA":            "/basketball/usa/nba/",
     "EuroLeague":     "/basketball/europe/euroleague/",
     "VTB":            "/basketball/russia/vtb-united-league/",
     "ACB":            "/basketball/spain/acb/",

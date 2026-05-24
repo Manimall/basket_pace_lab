@@ -74,7 +74,8 @@ async def _load_targets(
     ]
     params: dict[str, Any] = {}
     if leagues:
-        conditions.append("m.tournament_name = ANY(:leagues)")
+        # COALESCE maps NULL tournament_name to 'NBA' so --leagues NBA works
+        conditions.append("COALESCE(m.tournament_name, 'NBA') = ANY(:leagues)")
         params["leagues"] = leagues
 
     where = " AND ".join(conditions)
@@ -97,7 +98,7 @@ async def _load_targets(
         _OddsTarget(
             match_id=int(r["id"]),
             flashscore_id=str(r["flashscore_id"]),
-            league=r["tournament_name"] or "",
+            league=r["tournament_name"] or "NBA",
             match_date=r["match_date"],
             home_team=r["home_team"],
             away_team=r["away_team"],
