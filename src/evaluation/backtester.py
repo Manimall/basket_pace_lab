@@ -138,8 +138,14 @@ def run_pipeline(
                     len(test_df),  guards.min_test_rows)
         return None
 
-    model   = train_classifier(train_df, target_col=BIN_TARGET)
-    X_te    = get_x(test_df)
+    # Per-league feature selection: single-league pipelines pass the league key
+    # so the selector can drop signal-shape-mismatched groups (e.g. fatigue for
+    # sparsely-scheduled leagues). Mixed-league pipelines pass None → default
+    # rules (which currently means "no fatigue" — see feature_selector).
+    league_key = spec.include[0] if len(spec.include) == 1 else None
+
+    model   = train_classifier(train_df, target_col=BIN_TARGET, league_key=league_key)
+    X_te    = get_x(test_df, league_key=league_key)
     probs   = model.predict_proba(X_te)[:, 1]
     actuals = test_df[TARGET].to_numpy()
     lines   = test_df[LINE_COL].to_numpy()
