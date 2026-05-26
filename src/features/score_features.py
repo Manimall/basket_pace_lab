@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from src.config import settings
 from src.database.engine import dispose_engine, get_session_factory
+from src.features.fatigue import FATIGUE_FEATURE_COLS, add_fatigue_features
 from src.features.rolling_utils import (
     EMA_SPAN,
     MATCHUP_COLS,
@@ -46,7 +47,9 @@ CAT_COLS: list[str]  = ["league"]
 # line_movement dropped: Flashscore API doesn't expose opening line,
 # so total_line_open is always NULL → feature would be 100% NaN.
 BM_COLS: list[str]   = ["bookmaker_total_closing", "market_vs_history_delta"]
-ALL_FEAT: list[str]  = ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + BM_COLS + CAT_COLS
+ALL_FEAT: list[str]  = (
+    ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + FATIGUE_FEATURE_COLS + BM_COLS + CAT_COLS
+)
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
@@ -221,6 +224,11 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     df["is_playoff"]     = (df["season_type"] == "playoffs").astype(int)
     df["home_days_rest"] = df["home_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
     df["away_days_rest"] = df["away_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
+
+    # ── Schedule-fatigue features ─────────────────────────────────────
+    # B2B flag, density windows (4d/7d), road streak, rest_diff. Off-season
+    # gaps reset all indicators — see src.features.fatigue for details.
+    df = add_fatigue_features(df)
 
     # ── Bookmaker signal features ─────────────────────────────────────
     # total_line = closing O/U line (NaN for matches without odds data)

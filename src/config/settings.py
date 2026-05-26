@@ -41,6 +41,11 @@ class FeatureConfig(BaseSettings):
     days_rest_clip_max: int = 21
     nba_playoff_start: str = "2026-04-19"
 
+    # Schedule-fatigue (V7) windowing knobs
+    fatigue_short_window_days:      int = 4    # "3 in 4 nights" pattern
+    fatigue_long_window_days:       int = 7    # weekly density context
+    fatigue_high_density_threshold: int = 3    # games in short window → high-density flag
+
 
 class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
