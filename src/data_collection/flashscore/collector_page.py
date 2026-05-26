@@ -65,10 +65,23 @@ COLLECTOR_LEAGUES: dict[str, dict] = {
     },
     # Adriatic League — pivot target after V6 (NBA market efficiency ceiling).
     # Sponsor naming on Flashscore: "AdmiralBet ABA League".
+    # All three seasons share tournament_name="ABA" → data merges in one bucket.
     "ABA": {
         "path":            "/basketball/europe/admiralbet-aba-league/",
         "tournament_name": "ABA",
         "season":          "ABA League 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "ABA_2425": {
+        "path":            "/basketball/europe/admiralbet-aba-league-2024-2025/",
+        "tournament_name": "ABA",
+        "season":          "ABA League 24/25",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "ABA_2324": {
+        "path":            "/basketball/europe/admiralbet-aba-league-2023-2024/",
+        "tournament_name": "ABA",
+        "season":          "ABA League 23/24",
         "season_type":     SeasonType.REGULAR,
     },
 }
