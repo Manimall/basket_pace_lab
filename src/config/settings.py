@@ -53,6 +53,32 @@ class ModelConfig(BaseSettings):
     min_test_rows: int = 20
 
 
+class EvaluationConfig(BaseSettings):
+    """Backtester knobs: bet economics, probability sweep, bootstrap CI, guards.
+
+    All values are env-overridable via the standard pydantic_settings mechanism
+    (see model_config). Defaults match the V6 baseline documented in
+    docs/backtester_evolution.md.
+    """
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Bet economics
+    odds: float = 1.90
+    flat_stake: float = 1.0
+
+    # Probability threshold sweep
+    prob_thresholds: tuple[float, ...] = (0.50, 0.52, 0.54, 0.56, 0.58, 0.60)
+
+    # Bootstrap CI
+    bootstrap_iters: int = 5000
+    bootstrap_seed: int = 42
+    bootstrap_ci_alpha: float = 0.05      # → 95% CI
+
+    # Pipeline guards — minimum rows required to run a per-league pipeline
+    min_train_rows: int = 100
+    min_test_rows: int = 30
+
+
 class CollectorConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -78,6 +104,7 @@ class Settings(BaseSettings):
     features: FeatureConfig = FeatureConfig()
     model: ModelConfig = ModelConfig()
     collector: CollectorConfig = CollectorConfig()
+    evaluation: EvaluationConfig = EvaluationConfig()
 
 
 settings = Settings()
