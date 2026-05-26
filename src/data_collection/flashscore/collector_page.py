@@ -84,6 +84,14 @@ COLLECTOR_LEAGUES: dict[str, dict] = {
         "season":          "ABA League 23/24",
         "season_type":     SeasonType.REGULAR,
     },
+    # Israeli Super League — R&D candidate: shifted calendar (war-affected),
+    # mid-season scoring anomaly with US legionnaires playing pure-stats basketball.
+    "Israel": {
+        "path":            "/basketball/israel/super-league/",
+        "tournament_name": "Israel",
+        "season":          "Super League 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
 }
 
 _JS_COLLECT_MATCHES = r"""

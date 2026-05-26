@@ -45,6 +45,8 @@ LEAGUE_PATHS: dict[str, str] = {
     "Taiwan_TPBL":    "/basketball/taiwan/tpbl/",
     # Adriatic League (sponsor name on Flashscore: "AdmiralBet ABA League")
     "ABA":            "/basketball/europe/admiralbet-aba-league/",
+    # Israeli top tier (Flashscore: "Super League")
+    "Israel":         "/basketball/israel/super-league/",
 }
 
 _JS_EXTRACT_MATCHES = r"""

@@ -81,6 +81,10 @@ _LEAGUES: dict[str, _LeagueConfig] = {
             FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2023-2024/results/",
         ],
     ),
+    "Israel": _LeagueConfig(
+        db_filter="m.tournament_name = 'Israel'",
+        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/israel/super-league/results/"],
+    ),
 }
 
 
