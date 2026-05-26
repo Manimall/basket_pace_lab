@@ -71,6 +71,20 @@ _LEAGUES: dict[str, _LeagueConfig] = {
         db_filter="m.tournament_name = 'LNBP'",
         fs_urls=[FLASHSCORE_BASE_URL + "/basketball/mexico/lnbp/results/"],
     ),
+    "ABA": _LeagueConfig(
+        db_filter="m.tournament_name = 'ABA'",
+        fs_urls=[
+            # Current season (2025/26) — sponsor naming "AdmiralBet ABA League"
+            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league/results/",
+            # Previous seasons — kept for historical matching when archive data is ingested
+            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2024-2025/results/",
+            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2023-2024/results/",
+        ],
+    ),
+    "Israel": _LeagueConfig(
+        db_filter="m.tournament_name = 'Israel'",
+        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/israel/super-league/results/"],
+    ),
 }
 
 
