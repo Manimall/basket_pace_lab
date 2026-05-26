@@ -1,183 +1,198 @@
-# Backtester evolution — V1 → V6
+# Эволюция бэктестера — V1 → V6
 
-Iterative log of betting-strategy experiments on `src/evaluation/backtester.py`.
-Each section: hypothesis tested, what changed, headline result, what we kept /
-discarded and why. Read top-to-bottom before proposing the next iteration —
-the failed branches are at least as informative as the successful ones.
+Итеративный лог экспериментов со стратегиями ставок в
+`src/evaluation/backtester.py`. Каждый раздел: проверяемая гипотеза, что
+изменили, главный результат, что оставили / отбросили и почему. Читать
+сверху вниз перед тем, как предлагать следующую итерацию — провальные
+ветки информативны не меньше успешных.
 
-All runs share the same chronological split: last 20% of each league = test,
-the rest = train. Flat 1u stake, 1.90 odds on both sides unless stated.
-
----
-
-## V1 — Regression baseline
-
-**Hypothesis.** If a CatBoostRegressor predicts `game_total` well, betting on
-whichever side of `bookmaker_total_closing` the prediction falls will yield
-positive ROI on volume.
-
-**What.** Train CatBoostRegressor on all 48 features (incl. `bookmaker_total_
-closing` and `market_vs_history_delta`); bet OVER if `pred > line` else UNDER.
-
-**Result.** OVERALL 51.70% WR, **−1.77% ROI** on 1087 bets. EuroLeague spike
-to 65% WR (later proved to be small-sample artefact).
-
-**Kept.** Architecture template — load → features → chrono_split → train →
-predict → simulate → aggregate. Stayed unchanged through all versions.
+Все прогоны делят данные одинаково: последние 20% каждой лиги — тест,
+остальное — train. Флэт 1u, коэффициент 1.90 на оба плеча, если не сказано
+иначе.
 
 ---
 
-## V2 — Edge-threshold sweep on raw point delta
+## V1 — Регрессионный бейзлайн
 
-**Hypothesis.** Filtering to only confident picks (`|pred − line| ≥ edge`) will
-lift winrate by trimming the dead zone around the line.
+**Гипотеза.** Если CatBoostRegressor хорошо предсказывает `game_total`, то
+ставка на ту сторону `bookmaker_total_closing`, куда смотрит прогноз, даст
+положительный ROI на объёме.
 
-**What.** Loop simulation over `edges = [0.0, 1.5, 3.0, 4.5, 6.0]`.
+**Что.** CatBoostRegressor на 48 фичах (включая `bookmaker_total_closing` и
+`market_vs_history_delta`); ставим OVER если `pred > line`, иначе UNDER.
 
-**Result.** Mid-range edges (1.5–4.5) were **worse** than no filter. Only
-`edge=6.0` produced +3.64% ROI / 54.55% WR — on 121 bets (too small).
+**Результат.** OVERALL 51.70% WR, **−1.77% ROI** на 1087 ставках.
+EuroLeague — всплеск до 65% WR (позже выяснилось — артефакт малой выборки).
 
-**Discarded.** Point-delta edge as a decision rule. The regressor's point
-deviation is not edge; it is mostly the regressor's own variance against a
-sharp market. The model anchors on the line and treats nearby predictions as
-"confident" when they are just noise.
-
----
-
-## V3 — Reframe as classification (with line in features)
-
-**Hypothesis.** Predicting `P(game_total > line)` directly (binary classifier)
-will surface honest probability-edge instead of a derived sign-of-residual.
-
-**What.** Swap to `CatBoostClassifier(Logloss / AUC)`. Bet OVER if
-`prob ≥ T`, UNDER if `prob ≤ 1−T`. Threshold sweep `[0.50…0.60]`.
-
-**Result.** Catastrophe. At T=0.50 OVERALL: **47.89% WR** (below 50%, below
-the naive "always-OVER" baseline of 52%). NBA T=0.50: 47.93% WR. Higher
-thresholds barely recovered to ~51%, never break-even.
-
-**Discarded.** Trusting raw classifier probs when the line is a feature.
-
-**Diagnosis.** Model fit noise around the line. With `bookmaker_total_closing`
-as a feature, the classifier learned tiny patterns inside the rolling-stats
-residual that the bookmaker already used to set the line. Those patterns
-were spurious on test → systematically inverted picks.
+**Оставили.** Каркас архитектуры — load → features → chrono_split → train →
+predict → simulate → aggregate. Прошёл без изменений через все версии.
 
 ---
 
-## V4 — Independent consensus (line hidden from the model)
+## V2 — Edge-фильтр по сырой дельте очков
 
-**Hypothesis.** Strip line-derived features so the classifier must form an
-independent total estimate; compare it with the line only at bet time.
+**Гипотеза.** Если фильтровать только уверенные пики (`|pred − line| ≥ edge`),
+винрейт вырастет за счёт обрезания «мёртвой зоны» вокруг линии.
 
-**What.** Exclude `BM_COLS = [bookmaker_total_closing, market_vs_history_delta]`
-from `_get_x`. Keep `total_line` purely for target / filter / simulation.
+**Что.** Цикл симуляции по `edges = [0.0, 1.5, 3.0, 4.5, 6.0]`.
 
-**Result.** NBA T=0.50: **53.69% WR / +2.00% ROI** (+5.76 p.p. WR vs V3).
-OVERALL break-even crossed at T ≥ 0.58. EuroLeague pattern looked noisy.
+**Результат.** Средние edge'и (1.5–4.5) оказались **хуже**, чем без фильтра
+вообще. Только `edge=6.0` дал +3.64% ROI / 54.55% WR — на 121 ставке
+(слишком мало).
 
-**Kept.** Hiding line-derived features from the model. This is now a
-permanent invariant — `_EXCLUDED_FEATS` is a hard constraint, not an
-experiment.
-
-**Caveat.** Winrate curve was non-monotonic (drop at T=0.54–0.56). Pft on
-high T came from few-but-confident picks. Bootstrap CI not yet computed.
+**Отбросили.** Дельту очков как сигнал для принятия решений. Дельта прогноза
+от регрессора — это не edge, а собственная дисперсия модели против
+эффективного рынка. Модель якорится на линию и считает близкие к ней
+прогнозы «уверенными», хотя это просто шум.
 
 ---
 
-## V5 — Isotonic calibration + Fractional Kelly
+## V3 — Переформулировка как классификация (с линией в фичах)
 
-**Hypothesis.** Calibrating probabilities will smooth the WR curve and unlock
-Kelly staking (which needs honest probabilities to be safe).
+**Гипотеза.** Прямое предсказание `P(game_total > line)` бинарным
+классификатором даст честный probability-edge вместо производного знака
+остатка регрессора.
 
-**What.** Manual 5-fold CV isotonic calibration on train (sklearn's
-`CalibratedClassifierCV` fails to clone CatBoost with `cat_features=[...]`,
-so calibration is hand-rolled with `IsotonicRegression`). Compounding
-Fractional Kelly at 0.25 × full Kelly from a virtual 100u bankroll.
+**Что.** Замена на `CatBoostClassifier(Logloss / AUC)`. Ставим OVER если
+`prob ≥ T`, UNDER если `prob ≤ 1−T`. Цикл по порогам `[0.50…0.60]`.
 
-**Result.** Calibration collapsed the prob distribution: max **0.661**, mean
-**0.524** (very close to the dataset OVER rate of 52.09% — a sign of honest
-calibration). NBA T=0.50 WR fell to 52.30%; high-T cells emptied (T=0.60:
-only 13 OVERALL bets). Kelly was strictly worse than Flat at every T (down to
-−35% ROI) — predictable when true edge ≤ 0.
+**Результат.** Катастрофа. На T=0.50 OVERALL: **47.89% WR** (ниже 50%, ниже
+наивного «всегда OVER» бейзлайна 52%). NBA T=0.50: 47.93% WR. Высокие пороги
+едва вылезали к ~51% и никогда не пробивали break-even.
 
-**Discarded for now.**
-- Random k-fold calibration on chronologically-ordered data. The temporal
-  dispersion between calibration folds and test era may explain the WR
-  regression vs V4.
-- Kelly until we actually have positive-edge probabilities. Variable sizing
-  on a near-break-even classifier amplifies losses.
+**Отбросили.** Доверие к сырым вероятностям классификатора, когда линия лежит
+в фичах.
 
-**Kept as future option.** Isotonic calibration *with a chronological holdout*
-(last 20% of train by date as a single calibration set) — never tested.
-
-**Diagnosis.** V4's high-T positive ROI was partly real edge + partly
-overconfidence luck. Calibration correctly killed the luck but at the cost
-of any tail signal. Honest verdict: the model has at most a small edge in
-the 0.50–0.55 band.
+**Диагноз.** Модель фитит шум вокруг линии. С `bookmaker_total_closing` в
+фичах классификатор учит микропаттерны внутри остатка ролящих статов,
+которые букмекер уже использовал при выставлении линии. Эти паттерны на
+тесте оказались ложными → систематически инвертированные пики.
 
 ---
 
-## V6 — Significance test + per-league split (current ceiling)
+## V4 — Независимая оценка (линия скрыта от модели)
 
-**Hypothesis.** If there is real per-league edge (NBA, EuroLeague), a model
-trained on a single league should surface it more cleanly than a global
-model. Bootstrap CI on ROI tells us whether what we see is distinguishable
-from zero.
+**Гипотеза.** Если убрать фичи-производные от линии, классификатор будет
+вынужден формировать независимую оценку тотала; сравнение с линией — только
+на этапе принятия решения о ставке.
 
-**What.** Revert to V4 (raw probs, no calibration, Flat only). Add bootstrap
-95% CI for ROI (5000 iterations per cell). Run three independent pipelines:
-NBA-only, EuroLeague-only, OTHER-leagues control.
+**Что.** Исключить `BM_COLS = [bookmaker_total_closing, market_vs_history_
+delta]` из `_get_x`. `total_line` остаётся только для таргета / фильтрации /
+симуляции.
 
-**Result.** **Not a single cell across NBA/EuroLeague/OTHER and any T has
-CI95 lower bound above zero.**
+**Результат.** NBA T=0.50: **53.69% WR / +2.00% ROI** (+5.76 п.п. WR против
+V3). OVERALL пробивает break-even при T ≥ 0.58. По EuroLeague паттерн
+выглядел шумным.
 
-| pipeline | T=0.50 WR | ROI | CI95 |
+**Оставили.** Скрытие фичей-производных от линии от модели. Теперь это
+постоянный инвариант — `_EXCLUDED_FEATS` это жёсткое ограничение, а не
+эксперимент.
+
+**Оговорка.** Кривая винрейта немонотонная (провал на T=0.54–0.56). Профит
+на высоком T держался на немногочисленных, но уверенных пиках. Bootstrap CI
+ещё не считали.
+
+---
+
+## V5 — Isotonic-калибровка + Фракционный Келли
+
+**Гипотеза.** Калибровка вероятностей сгладит кривую WR и разблокирует
+стейкинг по Келли (которому нужны честные вероятности, чтобы не убить банк).
+
+**Что.** Ручная 5-fold CV isotonic-калибровка на train (sklearn'овский
+`CalibratedClassifierCV` падает на `clone()` для CatBoost с
+`cat_features=[...]`, поэтому калибровка собрана руками через
+`IsotonicRegression`). Компаундный фракционный Келли на 0.25 от полного
+из виртуального банка 100u.
+
+**Результат.** Калибровка сжала распределение вероятностей: max **0.661**,
+mean **0.524** (очень близко к доле OVER в датасете — 52.09%, это признак
+честной калибровки). NBA T=0.50 WR упал до 52.30%; высокие пороги опустели
+(T=0.60: всего 13 OVERALL ставок). Келли строго хуже флэта на каждом T
+(вплоть до −35% ROI) — предсказуемо, когда настоящий edge ≤ 0.
+
+**Отбросили на данный момент.**
+- Random k-fold калибровку на хронологически упорядоченных данных. Временной
+  разрыв между калибровочными фолдами и тестовой эпохой может объяснять
+  регрессию WR относительно V4.
+- Келли, пока у нас нет вероятностей с положительным edge. Переменное
+  сайзинг на классификаторе у break-even усиливает убытки.
+
+**Сохранили как опцию на будущее.** Isotonic-калибровка **с хронологическим
+holdout'ом** (последние 20% train по дате — единый калибровочный сет) —
+не пробовали.
+
+**Диагноз.** Плюсовой ROI на высоком T в V4 был смесью реального слабого
+edge + переуверенностью на хвосте, где попалась удача. Калибровка корректно
+убила удачу, но вместе с ней и любой хвостовой сигнал. Честный приговор:
+у модели в лучшем случае слабый edge в диапазоне 0.50–0.55.
+
+---
+
+## V6 — Тест на статзначимость + per-league сплит (текущий потолок)
+
+**Гипотеза.** Если есть реальный per-league edge (NBA, EuroLeague), модель,
+обученная на одной лиге, должна показать его чище, чем глобальная.
+Bootstrap CI на ROI скажет, отличимо ли увиденное от нуля.
+
+**Что.** Откат к V4 (сырые вероятности, без калибровки, только флэт).
+Добавлен bootstrap 95% CI для ROI (5000 итераций на ячейку). Три независимых
+пайплайна: NBA-only, EuroLeague-only, OTHER-лиги контроль.
+
+**Результат. Ни одна из ячеек по NBA/EuroLeague/OTHER и по любому T не имеет
+нижнюю границу CI95 выше нуля.**
+
+| пайплайн | T=0.50 WR | ROI | CI95 |
 |---|---|---|---|
 | NBA-only           | 50.69% | −3.69% | [−12.44%; +5.07%] |
 | EuroLeague-only    | 46.25% | −12.13% | [−33.50%; +9.25%] |
-| OTHER (control)    | 50.69% | −3.69% | [−11.57%; +4.20%] |
+| OTHER (контроль)   | 50.69% | −3.69% | [−11.57%; +4.20%] |
 
-NBA-only **underperforms** V4 global on the same NBA test set (53.69% →
-50.69% WR) — specialisation sacrificed cross-league data without finding
-NBA-specific signal. EuroLeague at T ≥ 0.58 has CI95 *upper* bound below
-zero ([−46.12%; −0.75%]): the model is statistically significant **anti-**
-predictive there. The V1 "65% EuroLeague" was a small-sample mirage.
+NBA-only **уступает** глобальной V4 на той же NBA-тестовой выборке (53.69%
+→ 50.69% WR) — специализация выкинула кросс-лиговые данные, не найдя ничего
+NBA-специфичного. EuroLeague при T ≥ 0.58 имеет **верхнюю** границу CI95
+ниже нуля ([−46.12%; −0.75%]): модель там статзначимо **анти-предиктивна**.
+V1-овские «65% EuroLeague» — мираж малой выборки.
 
-**Verdict.** The current 46-feature set has reached its information ceiling
-on the closing line. We cannot distinguish our model's ROI from zero on
-1000+ test bets. Further ML iteration on these features is shuffling noise.
+**Приговор.** Текущий набор из 46 фичей упёрся в свой информационный
+потолок относительно закрывающей линии. Мы не можем отличить ROI нашей
+модели от нуля на 1000+ тестовых ставках. Дальнейшие ML-итерации на этих
+фичах — перемешивание шума.
 
 ---
 
-## What we kept as permanent invariants
+## Что оставили как постоянные инварианты
 
-1. Hide all line-derived features from the model (`_EXCLUDED_FEATS = BM_COLS`).
-2. Chronological per-league split (no shuffle, no leakage from future games).
-3. Bootstrap CI on every ROI claim. No "+2% ROI" gets reported again without
-   the interval.
-4. Per-league test breakdown alongside OVERALL. Aggregates hide structure.
+1. Скрываем все фичи-производные от линии от модели
+   (`_EXCLUDED_FEATS = BM_COLS`).
+2. Хронологический per-league сплит (без shuffle, без утечек из будущего).
+3. Bootstrap CI на любое утверждение про ROI. Никакого «+2% ROI» без
+   доверительного интервала.
+4. Per-league разбивка теста рядом с OVERALL. Агрегаты прячут структуру.
 
-## Dead branches — do not revisit without new evidence
+## Мёртвые ветки — не возвращаться без новых вводных
 
-- Point-delta edge filtering on a regressor's output (V2). Mathematically
-  not an edge.
-- Including `bookmaker_total_closing` or any line-derived column in `X` (V3).
-  Causes anchor-on-market collapse.
-- Random k-fold isotonic calibration on chronologically-ordered data (V5).
-  Try a chronological holdout calibrator instead, if revisited.
-- Per-league CatBoost on NBA-only data (V6). 1700 rows is not enough; cross-
-  league transfer learning beats specialisation on this dataset.
+- Edge-фильтр по дельте регрессора `pred − line` (V2). Математически это
+  не edge.
+- Включение `bookmaker_total_closing` или любой производной от линии
+  колонки в `X` (V3). Вызывает коллапс модели в якорь на рынок.
+- Random k-fold isotonic калибровка на хронологически упорядоченных данных
+  (V5). Если возвращаться — пробовать хронологический holdout-калибратор.
+- Per-league CatBoost на NBA-only данных (V6). 1700 строк недостаточно;
+  кросс-лиговый transfer learning бьёт специализацию на этом датасете.
 
-## Open paths (untried, ordered by expected ROI lift / cost)
+## Открытые направления (не пробованы, в порядке ROI / стоимость)
 
-1. **Late-scratch injury / lineup deltas.** Bookmakers lag by 30–60 min on
-   late scratches; this is the largest known soft-market signal.
-2. **Multi-book line consensus + reverse line movement.** Pinnacle/Circa
-   moves first; off-shore books lag. RLM as a feature.
-3. **Referee assignments.** NBA refs differ ±2–3 points on average total.
-4. **Schedule fatigue features.** Back-to-back, time-zone delta, days until
-   next game.
+1. **Late-scratch составы и травмы.** Букмекеры запаздывают на 30-60 минут
+   на late scratches — самый известный неэффективный сигнал на soft-маркете.
+2. **Консенсус линий по нескольким книгам + reverse line movement.**
+   Pinnacle/Circa двигают линию первыми; off-shore книги отстают. RLM как
+   отдельная фича.
+3. **Назначения судей.** Конкретные арбитры в NBA дают системно разные
+   тоталы (±2-3 очка от среднего).
+4. **Усталость и расписание.** Back-to-back, разница часовых поясов, дней
+   до следующей игры.
 
-All four require new data pipelines, not new modelling tricks. Until at
-least one of them is in the dataset, V6 is the documented ceiling.
+Все четыре требуют новых пайплайнов сбора данных, а не новых ML-приёмов.
+Пока хотя бы один не появится в датасете — V6 это задокументированный
+потолок.
