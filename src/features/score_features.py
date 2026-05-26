@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date
 
 import pandas as pd
 from sqlalchemy import text
@@ -53,6 +54,9 @@ ALL_FEAT: list[str]  = (
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
+# Current-season hard gate. Past seasons are dropped at SQL load time to keep
+# the entire pipeline (build_features, prepare_dataset, validate_by_league,
+# backtester*) on a single chronological cohort. See FeatureConfig docstring.
 _SQL_MATCHES = """
     SELECT
         m.id           AS match_id,
@@ -69,32 +73,53 @@ _SQL_MATCHES = """
     WHERE m.home_score_final IS NOT NULL
       AND m.away_score_final IS NOT NULL
       AND m.has_quarter_breakdown = TRUE
+      AND m.scheduled_at >= :current_season_start
     ORDER BY m.scheduled_at
 """
 
 _SQL_QS = """
-    SELECT match_id, period_number,
-           home_score, away_score,
-           home_pace,  away_pace
-    FROM quarter_stats
-    WHERE period_type::text = 'QUARTER'
-      AND period_number IN (1, 2, 3, 4)
-    ORDER BY match_id, period_number
+    SELECT qs.match_id, qs.period_number,
+           qs.home_score, qs.away_score,
+           qs.home_pace,  qs.away_pace
+    FROM quarter_stats qs
+    JOIN matches m ON m.id = qs.match_id
+    WHERE qs.period_type::text = 'QUARTER'
+      AND qs.period_number IN (1, 2, 3, 4)
+      AND m.scheduled_at >= :current_season_start
+    ORDER BY qs.match_id, qs.period_number
 """
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 
 async def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    sf = get_session_factory()
+    """Load current-season matches + quarter_stats from PostgreSQL.
+
+    Filters both queries by ``settings.features.current_season_start`` so that
+    every downstream consumer (feature build, backtester, validate_by_league)
+    sees the same single-season cohort. Past seasons are treated as
+    information poison and excluded at the source.
+
+    Returns:
+        Tuple ``(matches, qs)``:
+            * matches: one row per finished match in the current season with
+              quarter breakdown available.
+            * qs: four rows per match (Q1-Q4) joined on the same season filter.
+    """
+    sf            = get_session_factory()
+    season_start  = date.fromisoformat(settings.features.current_season_start)
+    params        = {"current_season_start": season_start}
     async with sf() as db:
-        m_rows = (await db.execute(text(_SQL_MATCHES))).mappings().all()
-        q_rows = (await db.execute(text(_SQL_QS))).mappings().all()
+        m_rows = (await db.execute(text(_SQL_MATCHES), params)).mappings().all()
+        q_rows = (await db.execute(text(_SQL_QS),      params)).mappings().all()
     await dispose_engine()
     matches = pd.DataFrame(m_rows)
     qs      = pd.DataFrame(q_rows)
     matches["scheduled_at"] = pd.to_datetime(matches["scheduled_at"], utc=True)
-    log.info("Loaded %d matches, %d QS rows.", len(matches), len(qs))
+    log.info(
+        "Loaded %d matches, %d QS rows (season ≥ %s).",
+        len(matches), len(qs), season_start.isoformat(),
+    )
     return matches, qs
 
 

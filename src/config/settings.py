@@ -41,6 +41,11 @@ class FeatureConfig(BaseSettings):
     days_rest_clip_max: int = 21
     nba_playoff_start: str = "2026-04-19"
 
+    # Current-season hard gate. Past seasons are treated as "information poison"
+    # (different rosters, coaches, paces) — model trains only on matches at or
+    # after this date. Bumped each new season.
+    current_season_start: str = "2025-08-01"
+
     # Schedule-fatigue (V7) windowing knobs
     fatigue_short_window_days:      int = 4    # "3 in 4 nights" pattern
     fatigue_long_window_days:       int = 7    # weekly density context
