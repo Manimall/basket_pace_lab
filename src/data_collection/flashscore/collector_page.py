@@ -17,6 +17,7 @@ from playwright.async_api import Page
 
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
+from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow, get_or_create_team, save_quarter_stats, upsert_match
 from src.database.models import MatchStatus, PeriodType, SeasonType
 
@@ -60,6 +61,14 @@ COLLECTOR_LEAGUES: dict[str, dict] = {
         "path":            "/basketball/taiwan/tpbl/",
         "tournament_name": "Taiwan_TPBL",
         "season":          "TPBL 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
+    # Adriatic League — pivot target after V6 (NBA market efficiency ceiling).
+    # Sponsor naming on Flashscore: "AdmiralBet ABA League".
+    "ABA": {
+        "path":            "/basketball/europe/admiralbet-aba-league/",
+        "tournament_name": "ABA",
+        "season":          "ABA League 25/26",
         "season_type":     SeasonType.REGULAR,
     },
 }
@@ -164,6 +173,9 @@ async def scrape_results_page(page: Page, path: str) -> list[FsCollectedMatch]:
     log.info("  Scraping: %s", url)
     await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
     await asyncio.sleep(2)
+    # Re-dismiss gambling-ads / lang-selector dialogs that reappear after
+    # per-page navigation and intercept the "Show more matches" click.
+    await dismiss_overlays(page)
 
     clicks = 0
     while True:

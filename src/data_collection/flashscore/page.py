@@ -19,6 +19,7 @@ from playwright.async_api import Page
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
 from src.data_collection.flashscore.norm import FsMatch, QScore, _norm, _sim
+from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow
 from src.database.models import PeriodType
 
@@ -42,6 +43,8 @@ LEAGUE_PATHS: dict[str, str] = {
     "PBA_Gov":        "/basketball/philippines/pba-governors-cup/",
     "Taiwan_PLeague": "/basketball/taiwan/p-league/",
     "Taiwan_TPBL":    "/basketball/taiwan/tpbl/",
+    # Adriatic League (sponsor name on Flashscore: "AdmiralBet ABA League")
+    "ABA":            "/basketball/europe/admiralbet-aba-league/",
 }
 
 _JS_EXTRACT_MATCHES = r"""
@@ -129,6 +132,10 @@ async def build_index_from_url(page: Page, url: str) -> list[FsMatch]:
         log.warning("  Failed to load %s: %s", url, exc)
         return []
     await asyncio.sleep(2)
+    # Per-page dismissal: gambling-ads / lang-selector dialogs reappear after
+    # navigation and intercept the "Show more matches" click. Discovered on
+    # the AdmiralBet ABA League page; same fix applies to any results page.
+    await dismiss_overlays(page)
 
     clicks = 0
     while True:
