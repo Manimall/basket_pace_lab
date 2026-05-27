@@ -11,12 +11,16 @@ import pandas as pd
 
 from src.config import settings
 
-# Stats used in score-based rolling (validate_by_league context)
+# Stats used in score-based rolling (validate_by_league context).
+# h2 = game - h1 (second half) is universal: derivable from scores alone,
+# so it works for every league regardless of box-score availability.
 SCORE_STAT_COLS: tuple[str, ...] = (
     "pts_scored_q1",
     "pts_allowed_q1",
     "pts_scored_h1",
     "pts_allowed_h1",
+    "pts_scored_h2",
+    "pts_allowed_h2",
     "pts_scored_game",
     "pts_allowed_game",
 )
@@ -51,6 +55,43 @@ def compute_rolling_ema(
             ).mean()
         parts.append(grp)
     return pd.concat(parts, ignore_index=True)
+
+
+def merge_rolling_by_side(
+    df: pd.DataFrame, rolling: pd.DataFrame, roll_cols: list[str],
+) -> pd.DataFrame:
+    """Attach per-team rolled columns onto a match frame as home_*/away_* pairs.
+
+    Shared by score-based and advanced-metric pipelines to avoid duplicating
+    the home/away merge dance.
+
+    Args:
+        df: Match-level frame; must contain ``match_id``, ``home_team_id``,
+            ``away_team_id``.
+        rolling: Per-appearance rows from ``compute_rolling_ema`` (one row per
+            team-match) carrying ``team_id`` and the columns in ``roll_cols``.
+        roll_cols: Names of the rolled columns to attach for each side.
+
+    Returns:
+        ``df`` extended with ``home_<col>`` and ``away_<col>`` for every
+        column in ``roll_cols``.
+    """
+    keep = ["match_id", "team_id"] + roll_cols
+    for side in ("home", "away"):
+        team_col = f"{side}_team_id"
+        side_roll = (
+            rolling
+            .merge(
+                df[["match_id", team_col]],
+                left_on=["match_id", "team_id"],
+                right_on=["match_id", team_col],
+                how="inner",
+            )[keep]
+            .rename(columns={c: f"{side}_{c}" for c in roll_cols})
+            .drop(columns="team_id")
+        )
+        df = df.merge(side_roll, on="match_id", how="left")
+    return df
 
 
 def fill_feature_nans(df: pd.DataFrame, feat_cols: list[str]) -> pd.DataFrame:

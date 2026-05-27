@@ -37,6 +37,8 @@ def _make_timeline(n: int = 8) -> pd.DataFrame:
         "pts_allowed_q1":   [22.0] * n,
         "pts_scored_h1":    [50.0] * n,
         "pts_allowed_h1":   [44.0] * n,
+        "pts_scored_h2":    [50.0 + i * 5 for i in range(n)],
+        "pts_allowed_h2":   [51.0 - i * 2 for i in range(n)],
     })
 
 

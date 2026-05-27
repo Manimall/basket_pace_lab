@@ -15,15 +15,22 @@ from sqlalchemy import text
 
 from src.config import settings
 from src.database.engine import dispose_engine, get_session_factory
+from src.features.advanced_metrics import (
+    ADVANCED_FEAT_COLS,
+    add_advanced_metrics,
+    aggregate_box_score,
+)
+from src.features.arena_context import ARENA_FEAT_COLS, add_arena_context
+from src.features.context_features import add_bookmaker_signals, add_rest_and_playoff
 from src.features.fatigue import FATIGUE_FEATURE_COLS, add_fatigue_features
 from src.features.rolling_utils import (
     EMA_SPAN,
     MATCHUP_COLS,
-    ROLL_WINDOWS,
     SCORE_STAT_COLS,
     compute_matchup_features,
     compute_rolling_ema,
     fill_feature_nans,
+    merge_rolling_by_side,
 )
 
 log = logging.getLogger(__name__)
@@ -49,7 +56,8 @@ CAT_COLS: list[str]  = ["league"]
 # so total_line_open is always NULL → feature would be 100% NaN.
 BM_COLS: list[str]   = ["bookmaker_total_closing", "market_vs_history_delta"]
 ALL_FEAT: list[str]  = (
-    ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + FATIGUE_FEATURE_COLS + BM_COLS + CAT_COLS
+    ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + FATIGUE_FEATURE_COLS
+    + ADVANCED_FEAT_COLS + ARENA_FEAT_COLS + BM_COLS + CAT_COLS
 )
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
@@ -79,8 +87,10 @@ _SQL_MATCHES = """
 
 _SQL_QS = """
     SELECT qs.match_id, qs.period_number,
-           qs.home_score, qs.away_score,
-           qs.home_pace,  qs.away_pace
+           qs.home_score,        qs.away_score,
+           qs.home_pace,         qs.away_pace,
+           qs.home_possessions,  qs.away_possessions,
+           qs.home_turnovers,    qs.away_turnovers
     FROM quarter_stats qs
     JOIN matches m ON m.id = qs.match_id
     WHERE qs.period_type::text = 'QUARTER'
@@ -126,14 +136,48 @@ async def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 # ── Feature engineering ───────────────────────────────────────────────────────
 
 
+def _build_team_timeline(df: pd.DataFrame, side: str) -> pd.DataFrame:
+    """Build one side's per-appearance timeline of score-based stats.
+
+    Args:
+        df: Match-level frame with quarter pivot columns and final scores.
+        side: ``"home"`` or ``"away"`` — selects scored/allowed orientation.
+
+    Returns:
+        One row per match for the given side, with the score timeline columns
+        (q1 / h1 / h2 / game, scored & allowed) plus ``win`` and ``pace``.
+        ``h2 = game - h1`` is the universal second-half stat.
+    """
+    own, opp = ("h", "a") if side == "home" else ("a", "h")
+    own_final = df[f"{side}_score_final"]
+    opp_final = df["away_score_final" if side == "home" else "home_score_final"]
+    own_h1 = df[f"{own}_q1"].fillna(0) + df[f"{own}_q2"].fillna(0)
+    opp_h1 = df[f"{opp}_q1"].fillna(0) + df[f"{opp}_q2"].fillna(0)
+    return pd.DataFrame({
+        "match_id":         df["match_id"],
+        "team_id":          df[f"{side}_team_id"],
+        "scheduled_at":     df["scheduled_at"],
+        "pts_scored_q1":    df[f"{own}_q1"],
+        "pts_allowed_q1":   df[f"{opp}_q1"],
+        "pts_scored_h1":    own_h1,
+        "pts_allowed_h1":   opp_h1,
+        "pts_scored_h2":    own_final - own_h1,
+        "pts_allowed_h2":   opp_final - opp_h1,
+        "pts_scored_game":  own_final,
+        "pts_allowed_game": opp_final,
+        "win":              (own_final > opp_final).astype(float),
+        "pace":             df[f"match_{side}_pace"],
+    })
+
+
 def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     """
-    Score-based rolling L3/L5/EMA-5 + matchup features, shift-1 (no leakage).
-    NaN in first-game rows filled with column mean.
-    """
-    rest_default  = settings.features.days_rest_default
-    rest_clip_max = settings.features.days_rest_clip_max
+    Score-based rolling L3/L5/EMA-5 + matchup + fatigue + advanced features.
 
+    shift-1 on every rolling stat guarantees no leakage. NaN in first-game
+    rows of score features filled with column mean; advanced metrics left NaN
+    for score-only leagues (no cross-league imputation).
+    """
     # ── quarter scores pivot ──────────────────────────────────────────
     wide = qs.pivot_table(
         index="match_id",
@@ -162,57 +206,18 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
         df["a_q1"].fillna(0) + df["a_q2"].fillna(0)
     )
 
-    # ── per-team timeline ─────────────────────────────────────────────
-    home_win = (df["home_score_final"] > df["away_score_final"]).astype(float)
-    away_win = (df["away_score_final"] > df["home_score_final"]).astype(float)
-
-    home_tl = pd.DataFrame({
-        "match_id":         df["match_id"],
-        "team_id":          df["home_team_id"],
-        "scheduled_at":     df["scheduled_at"],
-        "pts_scored_q1":    df["h_q1"],
-        "pts_allowed_q1":   df["a_q1"],
-        "pts_scored_h1":    df["h_q1"].fillna(0) + df["h_q2"].fillna(0),
-        "pts_allowed_h1":   df["a_q1"].fillna(0) + df["a_q2"].fillna(0),
-        "pts_scored_game":  df["home_score_final"],
-        "pts_allowed_game": df["away_score_final"],
-        "win":              home_win,
-        "pace":             df["match_home_pace"],
-    })
-    away_tl = pd.DataFrame({
-        "match_id":         df["match_id"],
-        "team_id":          df["away_team_id"],
-        "scheduled_at":     df["scheduled_at"],
-        "pts_scored_q1":    df["a_q1"],
-        "pts_allowed_q1":   df["h_q1"],
-        "pts_scored_h1":    df["a_q1"].fillna(0) + df["a_q2"].fillna(0),
-        "pts_allowed_h1":   df["h_q1"].fillna(0) + df["h_q2"].fillna(0),
-        "pts_scored_game":  df["away_score_final"],
-        "pts_allowed_game": df["home_score_final"],
-        "win":              away_win,
-        "pace":             df["match_away_pace"],
-    })
-
-    timeline = pd.concat([home_tl, away_tl], ignore_index=True)
+    # ── per-team timeline + rolling (shift-1, no leakage) ─────────────
+    timeline = pd.concat(
+        [_build_team_timeline(df, "home"), _build_team_timeline(df, "away")],
+        ignore_index=True,
+    )
     rolling  = compute_rolling_ema(timeline, stat_cols=_TIMELINE_STAT_COLS)
-
     roll_cols = [
         f"{col}_{sfx}"
         for col in _TIMELINE_STAT_COLS
         for sfx in ("L3", "L5", f"EMA{EMA_SPAN}")
     ]
-    keep = ["match_id", "team_id"] + roll_cols
-
-    for side in ("home", "away"):
-        team_col = f"{side}_team_id"
-        side_roll = (
-            rolling
-            .merge(df[["match_id", team_col]], left_on=["match_id", "team_id"],
-                   right_on=["match_id", team_col], how="inner")[keep]
-            .rename(columns={c: f"{side}_{c}" for c in roll_cols})
-            .drop(columns="team_id")
-        )
-        df = df.merge(side_roll, on="match_id", how="left")
+    df = merge_rolling_by_side(df, rolling, roll_cols)
 
     # ── matchup features ──────────────────────────────────────────────
     league_avg_pace = df.groupby("league")["match_home_pace"].transform("mean")
@@ -224,53 +229,15 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
         league_avg_pace=league_avg_pace,
     )
 
-    # ── NaN fill ──────────────────────────────────────────────────────
+    # ── NaN fill (score features only; advanced left NaN deliberately) ─
     score_feat_cols = [f"{side}_{c}" for side in ("home", "away") for c in roll_cols]
     fill_feature_nans(df, score_feat_cols + list(MATCHUP_COLS))
 
-    # ── days rest ─────────────────────────────────────────────────────
-    all_apps = pd.concat([
-        df[["match_id", "scheduled_at", "home_team_id"]].rename(columns={"home_team_id": "team_id"}),
-        df[["match_id", "scheduled_at", "away_team_id"]].rename(columns={"away_team_id": "team_id"}),
-    ]).sort_values(["team_id", "scheduled_at"])
-    all_apps["days_rest"] = all_apps.groupby("team_id")["scheduled_at"].diff().dt.days
-    all_apps["days_rest"] = all_apps["days_rest"].fillna(rest_default).clip(0, rest_clip_max)
-
-    for side in ("home", "away"):
-        team_col = f"{side}_team_id"
-        rest = (
-            all_apps
-            .merge(df[["match_id", team_col]].rename(columns={team_col: "team_id"}),
-                   on=["match_id", "team_id"])[["match_id", "days_rest"]]
-            .rename(columns={"days_rest": f"{side}_days_rest"})
-        )
-        df = df.merge(rest, on="match_id", how="left")
-
-    df["is_playoff"]     = (df["season_type"] == "playoffs").astype(int)
-    df["home_days_rest"] = df["home_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
-    df["away_days_rest"] = df["away_days_rest"].fillna(rest_default).clip(0, rest_clip_max)
-
-    # ── Schedule-fatigue features ─────────────────────────────────────
-    # B2B flag, density windows (4d/7d), road streak, rest_diff. Off-season
-    # gaps reset all indicators — see src.features.fatigue for details.
+    # ── context, fatigue, advanced, arena, bookmaker ──────────────────
+    df = add_rest_and_playoff(df)
     df = add_fatigue_features(df)
-
-    # ── Bookmaker signal features ─────────────────────────────────────
-    # total_line = closing O/U line (NaN for matches without odds data)
-    df["bookmaker_total_closing"] = df["total_line"]
-
-    # line_movement > 0 means market moved the total UP (sharp money on Over)
-    # NaN when opening line is unavailable (older data or source didn't provide it)
-    df["line_movement"] = df["total_line"] - df["total_line_open"]
-
-    # market_vs_history_delta: form-based expected total minus market expectation.
-    # Positive = teams are scoring more than the market expects (Over lean).
-    # Negative = teams are scoring less (Under lean).
-    h_scored_l5 = df.get("home_pts_scored_game_L5")
-    a_scored_l5 = df.get("away_pts_scored_game_L5")
-    if h_scored_l5 is not None and a_scored_l5 is not None:
-        df["market_vs_history_delta"] = (h_scored_l5 + a_scored_l5) - df["total_line"]
-    else:
-        df["market_vs_history_delta"] = float("nan")
+    df = add_advanced_metrics(df, aggregate_box_score(qs))
+    df = add_arena_context(df)
+    df = add_bookmaker_signals(df)
 
     return df
