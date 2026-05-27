@@ -29,9 +29,13 @@ log = logging.getLogger(__name__)
 # Per-team advanced stat names (computed per match, then rolled).
 _ADV_STATS: tuple[str, ...] = ("ortg", "drtg", "tov_rate", "true_pace")
 
-# Advanced metrics use a shorter window set than base stats: L3 + EMA only.
-_ADV_WINDOWS: tuple[int, ...] = (3,)
+# Advanced metrics use a shorter window set than base stats: the configured
+# short rolling window + EMA. Derived from config — no hardcoded window value.
+_ADV_WINDOWS:  tuple[int, ...] = (settings.features.score_roll_windows[0],)
 _ADV_EMA_SPAN: int            = settings.features.ema_span
+# Rolling suffixes derived from the windows above (single source of truth — the
+# "L{w}" strings can never drift out of sync with _ADV_WINDOWS).
+_ADV_SUFFIXES: tuple[str, ...] = tuple(f"L{w}" for w in _ADV_WINDOWS) + (f"EMA{_ADV_EMA_SPAN}",)
 
 _PER_100:                float = 100.0
 _MIN_VALID_POSSESSIONS:  float = 1.0   # below this = missing box-score
@@ -50,7 +54,7 @@ ADVANCED_FEAT_COLS: list[str] = [
     f"{side}_{stat}_{sfx}"
     for side in ("home", "away")
     for stat in _ADV_STATS
-    for sfx in ("L3", f"EMA{_ADV_EMA_SPAN}")
+    for sfx in _ADV_SUFFIXES
 ] + [HAS_BOXSCORE_COL]
 
 
@@ -157,7 +161,7 @@ def add_advanced_metrics(df: pd.DataFrame, box: pd.DataFrame) -> pd.DataFrame:
     roll_cols = [
         f"{stat}_{sfx}"
         for stat in _ADV_STATS
-        for sfx in ("L3", f"EMA{_ADV_EMA_SPAN}")
+        for sfx in _ADV_SUFFIXES
     ]
     df = merge_rolling_by_side(df, rolling, roll_cols)
 
