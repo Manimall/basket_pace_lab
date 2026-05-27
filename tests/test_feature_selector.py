@@ -12,6 +12,7 @@ from src.evaluation.feature_selector import (
     FeatureGroup,
     get_excluded_features,
 )
+from src.features.advanced_metrics import ADVANCED_FEAT_COLS
 from src.features.fatigue import FATIGUE_FEATURE_COLS
 from src.features.score_features import BM_COLS
 
@@ -102,6 +103,31 @@ def test_default_groups_contains_base_only():
     assert FeatureGroup.FATIGUE not in DEFAULT_GROUPS
 
 
-def test_nba_config_contains_both_groups():
+def test_nba_config_contains_base_and_fatigue_only():
     assert FeatureGroup.BASE in FEATURES_BY_LEAGUE["NBA"]
     assert FeatureGroup.FATIGUE in FEATURES_BY_LEAGUE["NBA"]
+    # ADVANCED deliberately OFF for NBA (isolation result: redundant noise).
+    assert FeatureGroup.ADVANCED not in FEATURES_BY_LEAGUE["NBA"]
+
+
+# ── advanced group (Four Factors) ─────────────────────────────────────────────
+
+
+def test_advanced_excluded_for_nba_isolation():
+    """NBA must NOT see advanced metrics — they collapse to raw-points noise."""
+    excluded = get_excluded_features("NBA")
+    for col in ADVANCED_FEAT_COLS:
+        assert col in excluded, f"advanced col {col!r} should be dropped for NBA"
+
+
+def test_advanced_excluded_for_default_fallback():
+    for col in ADVANCED_FEAT_COLS:
+        assert col in get_excluded_features("EuroLeague")
+        assert col in get_excluded_features(None)
+
+
+def test_nba_still_keeps_h2_base_feature():
+    """H2 is a BASE feature (rolling score), must survive for NBA."""
+    excluded = get_excluded_features("NBA")
+    assert "home_pts_scored_h2_L3" not in excluded
+    assert "away_pts_allowed_h2_EMA5" not in excluded

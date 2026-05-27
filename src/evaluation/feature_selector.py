@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from enum import StrEnum
 
+from src.features.advanced_metrics import ADVANCED_FEAT_COLS
 from src.features.fatigue import FATIGUE_FEATURE_COLS
 from src.features.score_features import BM_COLS
 
@@ -31,17 +32,26 @@ class FeatureGroup(StrEnum):
     """Logical buckets of features for per-league selection.
 
     Members:
-        BASE: Always-on features — rolling stats, matchup deltas, context
-            (``home_days_rest`` etc.). These never get dropped.
+        BASE: Always-on features — rolling score stats (incl. universal H2),
+            matchup deltas, context (``home_days_rest`` etc.). Never dropped.
         FATIGUE: V7 schedule-fatigue columns (10 cols). Densely-scheduled
             leagues benefit; sparsely-scheduled ones get noise.
+        ADVANCED: Four-Factors metrics (ORtg/DRtg/TOV%/true_pace + has_boxscore).
+            Only meaningful where box-score exists (Sofascore). At homogeneous
+            NBA pace these collapse to scaled copies of raw points
+            (multicollinearity) and add noise — disabled by default.
     """
-    BASE    = "base"
-    FATIGUE = "fatigue"
+    BASE     = "base"
+    FATIGUE  = "fatigue"
+    ADVANCED = "advanced"
 
 
 # Per-league enabled groups. Unlisted leagues fall back to DEFAULT_GROUPS.
 # Documented empirically in postmortem V7 / V7.1.
+#
+# NBA: fatigue helps (dense calendar). ADVANCED intentionally OFF — the
+# isolation test showed Four-Factors metrics are redundant at NBA's uniform
+# pace (ORtg ≈ scaled raw points) and only add multicollinearity noise.
 FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
     "NBA": frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
 }
@@ -53,7 +63,8 @@ DEFAULT_GROUPS: frozenset[FeatureGroup] = frozenset({FeatureGroup.BASE})
 # Group → the column names it controls. BASE is implicit (everything not
 # listed in another group). Only non-base groups need an entry here.
 _GROUP_COLUMNS: dict[FeatureGroup, frozenset[str]] = {
-    FeatureGroup.FATIGUE: frozenset(FATIGUE_FEATURE_COLS),
+    FeatureGroup.FATIGUE:  frozenset(FATIGUE_FEATURE_COLS),
+    FeatureGroup.ADVANCED: frozenset(ADVANCED_FEAT_COLS),
 }
 
 # Columns always hidden from the model (V4 invariant — line-derived).
