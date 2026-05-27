@@ -51,6 +51,9 @@ class FeatureConfig(BaseSettings):
     fatigue_long_window_days:       int = 7    # weekly density context
     fatigue_high_density_threshold: int = 3    # games in short window → high-density flag
 
+    # Arena-context (V8): rolling window for the home/away win-rate split
+    arena_winrate_window: int = 5
+
 
 class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

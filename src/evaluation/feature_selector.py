@@ -22,6 +22,7 @@ import logging
 from enum import StrEnum
 
 from src.features.advanced_metrics import ADVANCED_FEAT_COLS
+from src.features.arena_context import ARENA_FEAT_COLS
 from src.features.fatigue import FATIGUE_FEATURE_COLS
 from src.features.score_features import BM_COLS
 
@@ -40,20 +41,33 @@ class FeatureGroup(StrEnum):
             Only meaningful where box-score exists (Sofascore). At homogeneous
             NBA pace these collapse to scaled copies of raw points
             (multicollinearity) and add noise — disabled by default.
+        ARENA: V8 home-court fortress / away vulnerability indices. European
+            leagues have strong home-court regimes; enabled there, off for NBA.
     """
     BASE     = "base"
     FATIGUE  = "fatigue"
     ADVANCED = "advanced"
+    ARENA    = "arena"
 
+
+# Leagues with structurally strong home-court advantage (European hardcore):
+# ARENA group is enabled for these. tournament_name values as stored in DB.
+_ARENA_LEAGUES: tuple[str, ...] = (
+    "EuroLeague", "ABA", "ACB", "BBL", "LNB", "LegaA", "VTB", "Israel",
+)
 
 # Per-league enabled groups. Unlisted leagues fall back to DEFAULT_GROUPS.
-# Documented empirically in postmortem V7 / V7.1.
+# Documented empirically in postmortem V7 / V7.1 / V8.
 #
-# NBA: fatigue helps (dense calendar). ADVANCED intentionally OFF — the
-# isolation test showed Four-Factors metrics are redundant at NBA's uniform
-# pace (ORtg ≈ scaled raw points) and only add multicollinearity noise.
+# NBA: fatigue helps (dense calendar). ADVANCED off — the isolation test showed
+# Four-Factors metrics are redundant at NBA's uniform pace. ARENA off pending
+# separate validation.
 FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
     "NBA": frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
+    **{
+        league: frozenset({FeatureGroup.BASE, FeatureGroup.ARENA})
+        for league in _ARENA_LEAGUES
+    },
 }
 
 # Fallback for any unlisted league or for mixed-league pipelines where no
@@ -65,6 +79,7 @@ DEFAULT_GROUPS: frozenset[FeatureGroup] = frozenset({FeatureGroup.BASE})
 _GROUP_COLUMNS: dict[FeatureGroup, frozenset[str]] = {
     FeatureGroup.FATIGUE:  frozenset(FATIGUE_FEATURE_COLS),
     FeatureGroup.ADVANCED: frozenset(ADVANCED_FEAT_COLS),
+    FeatureGroup.ARENA:    frozenset(ARENA_FEAT_COLS),
 }
 
 # Columns always hidden from the model (V4 invariant — line-derived).

@@ -20,6 +20,7 @@ from src.features.advanced_metrics import (
     add_advanced_metrics,
     aggregate_box_score,
 )
+from src.features.arena_context import ARENA_FEAT_COLS, add_arena_context
 from src.features.context_features import add_bookmaker_signals, add_rest_and_playoff
 from src.features.fatigue import FATIGUE_FEATURE_COLS, add_fatigue_features
 from src.features.rolling_utils import (
@@ -56,7 +57,7 @@ CAT_COLS: list[str]  = ["league"]
 BM_COLS: list[str]   = ["bookmaker_total_closing", "market_vs_history_delta"]
 ALL_FEAT: list[str]  = (
     ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + FATIGUE_FEATURE_COLS
-    + ADVANCED_FEAT_COLS + BM_COLS + CAT_COLS
+    + ADVANCED_FEAT_COLS + ARENA_FEAT_COLS + BM_COLS + CAT_COLS
 )
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
@@ -232,10 +233,11 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     score_feat_cols = [f"{side}_{c}" for side in ("home", "away") for c in roll_cols]
     fill_feature_nans(df, score_feat_cols + list(MATCHUP_COLS))
 
-    # ── context, fatigue, advanced, bookmaker ─────────────────────────
+    # ── context, fatigue, advanced, arena, bookmaker ──────────────────
     df = add_rest_and_playoff(df)
     df = add_fatigue_features(df)
     df = add_advanced_metrics(df, aggregate_box_score(qs))
+    df = add_arena_context(df)
     df = add_bookmaker_signals(df)
 
     return df
