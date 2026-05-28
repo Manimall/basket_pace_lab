@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,12 +26,17 @@ const (
 	defaultWorkers        = 4
 	defaultRequestsPerSec = 2
 	defaultHTTPTimeout    = 15 * time.Second
+	defaultCookiesPath    = "cookies.json"
+
+	defaultLeagues    = "NBA,EuroLeague"
+	defaultMatchLimit = 0 // 0 = no limit (enrich every matching match)
 )
 
 // Config is the fully-resolved runtime configuration.
 type Config struct {
 	DB        DBConfig
 	Sofascore SofascoreConfig
+	Scout     ScoutConfig
 }
 
 // DBConfig holds PostgreSQL connection parameters.
@@ -57,6 +63,13 @@ type SofascoreConfig struct {
 	Workers        int           // size of the goroutine worker pool
 	RequestsPerSec int           // global rate limit (shared across workers)
 	HTTPTimeout    time.Duration // per-request timeout
+	CookiesPath    string        // optional cookies.json to dodge edge WAF 403s
+}
+
+// ScoutConfig controls which matches the enrichment orchestrator targets.
+type ScoutConfig struct {
+	Leagues    []string // leagues to enrich (matched via COALESCE(tournament,'NBA'))
+	MatchLimit int      // cap on matches per run; 0 = no limit
 }
 
 // Load resolves configuration from the environment, applying defaults for any
@@ -74,11 +87,23 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	matchLimit, err := getenvInt("SCOUT_MATCH_LIMIT", defaultMatchLimit)
+	if err != nil {
+		return Config{}, err
+	}
 	if workers < 1 {
 		return Config{}, fmt.Errorf("SCOUT_WORKERS must be >= 1, got %d", workers)
 	}
 	if rps < 1 {
 		return Config{}, fmt.Errorf("SCOUT_REQUESTS_PER_SEC must be >= 1, got %d", rps)
+	}
+	if matchLimit < 0 {
+		return Config{}, fmt.Errorf("SCOUT_MATCH_LIMIT must be >= 0, got %d", matchLimit)
+	}
+
+	leagues := getenvCSV("SCOUT_LEAGUES", defaultLeagues)
+	if len(leagues) == 0 {
+		return Config{}, fmt.Errorf("SCOUT_LEAGUES resolved to an empty list")
 	}
 
 	return Config{
@@ -95,8 +120,27 @@ func Load() (Config, error) {
 			Workers:        workers,
 			RequestsPerSec: rps,
 			HTTPTimeout:    timeout,
+			CookiesPath:    getenv("SOFASCORE_COOKIES_PATH", defaultCookiesPath),
+		},
+		Scout: ScoutConfig{
+			Leagues:    leagues,
+			MatchLimit: matchLimit,
 		},
 	}, nil
+}
+
+// getenvCSV splits a comma-separated env value into trimmed, non-empty items,
+// falling back to the comma-separated default when unset.
+func getenvCSV(key, fallback string) []string {
+	raw := getenv(key, fallback)
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getenv(key, fallback string) string {

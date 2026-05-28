@@ -5,10 +5,13 @@ package sofascore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"basket_pace_lab/etl_scout/internal/config"
@@ -26,25 +29,75 @@ var defaultHeaders = map[string]string{
 
 const statusOK = http.StatusOK
 
+// ErrNoStatistics signals Sofascore has no box score for the event (HTTP 404).
+// Callers treat it as a soft skip, not a hard failure.
+var ErrNoStatistics = errors.New("no statistics available")
+
+// cookie is the browser-export shape we read from cookies.json.
+type cookie struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 // Client issues throttled GETs against the Sofascore API. A single shared
 // time.Ticker enforces a global request rate regardless of worker count, so
 // concurrency never translates into a request burst that trips IP blocking.
 type Client struct {
-	cfg     config.SofascoreConfig
-	http    *http.Client
-	limiter *time.Ticker
-	log     *slog.Logger
+	cfg          config.SofascoreConfig
+	http         *http.Client
+	limiter      *time.Ticker
+	log          *slog.Logger
+	cookieHeader string
 }
 
 // NewClient builds a Client. Close() must be called to release the ticker.
 func NewClient(cfg config.SofascoreConfig, log *slog.Logger) *Client {
 	interval := time.Second / time.Duration(cfg.RequestsPerSec)
-	return &Client{
-		cfg:     cfg,
-		http:    &http.Client{Timeout: cfg.HTTPTimeout},
-		limiter: time.NewTicker(interval),
-		log:     log,
+
+	cookieHeader, err := loadCookieHeader(cfg.CookiesPath)
+	switch {
+	case err != nil:
+		log.Warn("cookie load failed; proceeding without", "path", cfg.CookiesPath, "error", err)
+	case cookieHeader == "":
+		log.Warn("no cookies loaded; Sofascore may return 403", "path", cfg.CookiesPath)
+	default:
+		log.Info("loaded sofascore cookies", "path", cfg.CookiesPath)
 	}
+
+	return &Client{
+		cfg:          cfg,
+		http:         &http.Client{Timeout: cfg.HTTPTimeout},
+		limiter:      time.NewTicker(interval),
+		log:          log,
+		cookieHeader: cookieHeader,
+	}
+}
+
+// loadCookieHeader renders a "name=value; …" Cookie header from a browser
+// cookies.json export. A missing path/file yields "" (the client still runs,
+// just more exposed to WAF 403s); a malformed file is a hard error.
+func loadCookieHeader(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read cookies %s: %w", path, err)
+	}
+	var cookies []cookie
+	if err := json.Unmarshal(data, &cookies); err != nil {
+		return "", fmt.Errorf("parse cookies %s: %w", path, err)
+	}
+	parts := make([]string, 0, len(cookies))
+	for _, c := range cookies {
+		if c.Name != "" {
+			parts = append(parts, c.Name+"="+c.Value)
+		}
+	}
+	return strings.Join(parts, "; "), nil
 }
 
 // Close stops the rate-limiting ticker.
@@ -70,6 +123,9 @@ func (c *Client) FetchStatistics(ctx context.Context, eventID int) (*model.Stati
 	for k, v := range defaultHeaders {
 		req.Header.Set(k, v)
 	}
+	if c.cookieHeader != "" {
+		req.Header.Set("Cookie", c.cookieHeader)
+	}
 
 	c.log.Debug("GET statistics", "event_id", eventID, "url", url)
 	resp, err := c.http.Do(req)
@@ -82,6 +138,9 @@ func (c *Client) FetchStatistics(ctx context.Context, eventID int) (*model.Stati
 		}
 	}()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("event %d: %w", eventID, ErrNoStatistics)
+	}
 	if resp.StatusCode != statusOK {
 		return nil, fmt.Errorf("event %d: unexpected status %d", eventID, resp.StatusCode)
 	}

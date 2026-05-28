@@ -1,9 +1,8 @@
-// Command scout is the etl_scout entrypoint: it loads config, connects to
-// PostgreSQL, and concurrently pulls box-score statistics from Sofascore.
+// Command scout enriches the matches database with box-score advanced metrics.
 //
-// This iteration wires the boilerplate end-to-end. Event IDs are passed via
-// -events for a smoke run; persistence of parsed box scores lands in a later
-// iteration.
+// It selects finished matches in the configured leagues that still lack a row
+// in team_match_advanced, fetches each one's Sofascore box score concurrently,
+// computes Possessions / ORtg / DRtg / 3PM / 3PA, and upserts the results.
 package main
 
 import (
@@ -12,11 +11,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
+	"time"
 
 	"basket_pace_lab/etl_scout/internal/config"
+	"basket_pace_lab/etl_scout/internal/enrich"
 	"basket_pace_lab/etl_scout/internal/sofascore"
 	"basket_pace_lab/etl_scout/internal/storage"
 )
@@ -24,16 +23,16 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	eventsRaw := flag.String("events", "", "comma-separated Sofascore event IDs to fetch")
+	limitFlag := flag.Int("limit", -1, "override max matches to enrich this run (-1 = use config, 0 = no limit)")
 	flag.Parse()
 
-	if err := run(logger, *eventsRaw); err != nil {
+	if err := run(logger, *limitFlag); err != nil {
 		logger.Error("scout failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger, eventsRaw string) error {
+func run(logger *slog.Logger, limitFlag int) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -53,51 +52,33 @@ func run(logger *slog.Logger, eventsRaw string) error {
 	client := sofascore.NewClient(cfg.Sofascore, logger)
 	defer client.Close()
 
-	eventIDs, err := parseEventIDs(eventsRaw)
+	limit := cfg.Scout.MatchLimit
+	if limitFlag >= 0 {
+		limit = limitFlag
+	}
+
+	refs, err := pool.FetchMatchesNeedingAdvanced(ctx, cfg.Scout.Leagues, limit)
 	if err != nil {
 		return err
 	}
-	if len(eventIDs) == 0 {
-		logger.Info("no -events provided; boilerplate is wired, nothing to fetch")
+	if len(refs) == 0 {
+		logger.Info("nothing to enrich", "leagues", cfg.Scout.Leagues)
 		return nil
 	}
 
-	logger.Info("fetching box scores",
-		"events", len(eventIDs), "workers", cfg.Sofascore.Workers,
-		"rps", cfg.Sofascore.RequestsPerSec)
+	logger.Info("starting enrichment",
+		"matches", len(refs), "leagues", cfg.Scout.Leagues,
+		"workers", cfg.Sofascore.Workers, "rps", cfg.Sofascore.RequestsPerSec)
 
-	results := client.FetchMany(ctx, eventIDs)
-	ok, failed := 0, 0
-	for _, r := range results {
-		if r.Err != nil {
-			failed++
-			logger.Warn("fetch failed", "event_id", r.EventID, "error", r.Err)
-			continue
-		}
-		ok++
-		logger.Info("fetched", "event_id", r.EventID, "periods", len(r.Stats.Statistics))
-	}
-	logger.Info("done", "ok", ok, "failed", failed)
+	start := time.Now()
+	summary := enrich.New(client, pool, logger).Run(ctx, refs)
+	elapsed := time.Since(start)
+
+	logger.Info("enrichment complete",
+		"enriched", summary.Enriched,
+		"skipped", summary.Skipped,
+		"failed", summary.Failed,
+		"total", len(refs),
+		"elapsed_sec", elapsed.Round(time.Millisecond).Seconds())
 	return nil
-}
-
-func parseEventIDs(raw string) ([]int, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	parts := strings.Split(raw, ",")
-	ids := make([]int, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		id, err := strconv.Atoi(p)
-		if err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
 }
