@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -130,10 +131,56 @@ func (c *Client) Close() {
 	c.limiter.Stop()
 }
 
-// FetchStatistics retrieves and decodes the period-split statistics for one
-// event. It blocks on the shared rate limiter before issuing the request, so
-// it is safe to call from many goroutines concurrently.
+const maxJitter = 400 * time.Millisecond
+
+// jitter returns a small random delay so retries from concurrent callers don't
+// align into a synchronised burst.
+func jitter() time.Duration {
+	return time.Duration(rand.Int63n(int64(maxJitter)))
+}
+
+// sleepCtx sleeps for d unless the context is cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// FetchStatistics retrieves the period-split statistics for one event, retrying
+// transient failures (403 throttle, network) with exponential backoff + jitter.
+// A 404 (ErrNoStatistics) and context cancellation are returned immediately —
+// neither is worth retrying. The shared rate limiter is honoured on every
+// attempt, so this stays safe for concurrent callers.
 func (c *Client) FetchStatistics(ctx context.Context, eventID int) (*model.StatisticsResponse, error) {
+	var lastErr error
+	for attempt := 0; attempt <= c.cfg.MaxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := c.cfg.RetryBackoff*time.Duration(1<<(attempt-1)) + jitter()
+			c.log.Debug("retrying after backoff", "event_id", eventID, "attempt", attempt, "backoff", backoff)
+			if err := sleepCtx(ctx, backoff); err != nil {
+				return nil, err
+			}
+		}
+		resp, err := c.fetchOnce(ctx, eventID)
+		if err == nil {
+			return resp, nil
+		}
+		if errors.Is(err, ErrNoStatistics) ||
+			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// fetchOnce performs a single rate-limited GET + decode (no retries).
+func (c *Client) fetchOnce(ctx context.Context, eventID int) (*model.StatisticsResponse, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

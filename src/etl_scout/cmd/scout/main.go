@@ -74,7 +74,8 @@ func run(logger *slog.Logger, limitFlag int) error {
 		"workers", cfg.Sofascore.Workers, "rps", cfg.Sofascore.RequestsPerSec)
 
 	start := time.Now()
-	summary := enrich.New(client, pool, logger).Run(ctx, refs)
+	enricher := enrich.New(client, pool, logger, cfg.Scout.MaxConsecutiveFails, cfg.Scout.ProgressEvery)
+	summary := enricher.Run(ctx, refs)
 	elapsed := time.Since(start)
 
 	logger.Info("enrichment complete",
@@ -82,6 +83,7 @@ func run(logger *slog.Logger, limitFlag int) error {
 		"skipped", summary.Skipped,
 		"failed", summary.Failed,
 		"total", len(refs),
+		"aborted", summary.Aborted,
 		"elapsed_sec", elapsed.Round(time.Millisecond).Seconds())
 	return nil
 }

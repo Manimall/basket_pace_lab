@@ -12,9 +12,9 @@ import (
 	"basket_pace_lab/etl_scout/internal/storage"
 )
 
-// Fetcher concurrently downloads statistics for many events (the worker pool).
+// Fetcher streams statistics for many events to a handler (the worker pool).
 type Fetcher interface {
-	FetchMany(ctx context.Context, eventIDs []int) []sofascore.Result
+	FetchManyFunc(ctx context.Context, eventIDs []int, handle func(sofascore.Result) bool)
 }
 
 // Saver persists one team's advanced stats for a match.
@@ -24,22 +24,32 @@ type Saver interface {
 
 // Summary is the end-of-run tally returned to the caller for the final log.
 type Summary struct {
-	Enriched int // both team rows saved
-	Skipped  int // no/incomplete box score on Sofascore (soft skip)
-	Failed   int // fetch or DB error (hard failure)
+	Enriched int  // both team rows saved
+	Skipped  int  // no/incomplete box score on Sofascore (soft skip)
+	Failed   int  // fetch or DB error (hard failure)
+	Aborted  bool // circuit breaker tripped before all matches were processed
 }
 
 // Enricher ties the fetcher and saver together. It owns no state beyond its
-// collaborators, so it is cheap to construct per run.
+// collaborators and tuning knobs, so it is cheap to construct per run.
 type Enricher struct {
-	fetcher Fetcher
-	saver   Saver
-	log     *slog.Logger
+	fetcher       Fetcher
+	saver         Saver
+	log           *slog.Logger
+	maxConsecFail int // circuit breaker threshold
+	progressEvery int // progress log cadence
 }
 
-// New builds an Enricher.
-func New(fetcher Fetcher, saver Saver, log *slog.Logger) *Enricher {
-	return &Enricher{fetcher: fetcher, saver: saver, log: log}
+// New builds an Enricher. maxConsecFail trips the circuit breaker (a sustained
+// block, e.g. an IP throttle); progressEvery sets the progress-log cadence.
+func New(fetcher Fetcher, saver Saver, log *slog.Logger, maxConsecFail, progressEvery int) *Enricher {
+	return &Enricher{
+		fetcher:       fetcher,
+		saver:         saver,
+		log:           log,
+		maxConsecFail: maxConsecFail,
+		progressEvery: progressEvery,
+	}
 }
 
 type outcome int
@@ -50,9 +60,11 @@ const (
 	outcomeFailed
 )
 
-// Run fetches all referenced events concurrently, then parses, computes, and
-// upserts each result. Per-match problems are logged and tallied; they never
-// abort the whole run.
+// Run streams each referenced event through fetch → parse → compute → upsert,
+// persisting progress incrementally. A run-ending block (many consecutive
+// failures) trips the circuit breaker and stops early; already-saved matches
+// stay, so a re-run resumes via the NOT EXISTS guard. Soft skips (no/incomplete
+// box score) reset the consecutive counter — they mean the server answered.
 func (e *Enricher) Run(ctx context.Context, refs []storage.MatchRef) Summary {
 	byEvent := make(map[int]storage.MatchRef, len(refs))
 	ids := make([]int, 0, len(refs))
@@ -62,21 +74,41 @@ func (e *Enricher) Run(ctx context.Context, refs []storage.MatchRef) Summary {
 	}
 
 	var sum Summary
-	for _, res := range e.fetcher.FetchMany(ctx, ids) {
+	consecutiveFails := 0
+
+	e.fetcher.FetchManyFunc(ctx, ids, func(res sofascore.Result) bool {
 		ref, ok := byEvent[res.EventID]
 		if !ok {
 			e.log.Warn("result for unknown event id", "event_id", res.EventID)
-			continue
+			return true
 		}
+
 		switch e.process(ctx, ref, res) {
 		case outcomeEnriched:
 			sum.Enriched++
+			consecutiveFails = 0
 		case outcomeSkipped:
 			sum.Skipped++
+			consecutiveFails = 0
 		case outcomeFailed:
 			sum.Failed++
+			consecutiveFails++
 		}
-	}
+
+		if processed := sum.Enriched + sum.Skipped + sum.Failed; processed%e.progressEvery == 0 {
+			e.log.Info("progress",
+				"processed", processed, "enriched", sum.Enriched,
+				"skipped", sum.Skipped, "failed", sum.Failed)
+		}
+
+		if consecutiveFails >= e.maxConsecFail {
+			e.log.Error("circuit breaker tripped; aborting (progress saved, re-run to resume)",
+				"consecutive_failures", consecutiveFails)
+			sum.Aborted = true
+			return false
+		}
+		return true
+	})
 	return sum
 }
 

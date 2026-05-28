@@ -15,13 +15,19 @@ type Result struct {
 	Err     error
 }
 
-// FetchMany fans event IDs out across cfg.Workers goroutines and collects the
-// results. Throttling is handled inside FetchStatistics via the shared ticker,
-// so the pool size controls parallelism while the rate stays globally bounded.
+// FetchManyFunc fans event IDs out across cfg.Workers goroutines and streams
+// each Result to handle as it arrives, so callers can persist progress
+// incrementally instead of buffering the whole batch. handle is invoked
+// serially (one result at a time), so it needs no locking and "consecutive"
+// counting is meaningful when Workers == 1.
 //
-// The returned slice has one Result per input ID; order is not guaranteed.
-// Cancelling ctx stops dispatch and drains in-flight work.
-func (c *Client) FetchMany(ctx context.Context, eventIDs []int) []Result {
+// Returning false from handle stops the run: dispatch halts, in-flight workers
+// drain, and FetchManyFunc returns. Throttling and retries live in
+// FetchStatistics, so the pool size only controls parallelism.
+func (c *Client) FetchManyFunc(ctx context.Context, eventIDs []int, handle func(Result) bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	jobs := make(chan int)
 	results := make(chan Result)
 
@@ -49,10 +55,25 @@ func (c *Client) FetchMany(ctx context.Context, eventIDs []int) []Result {
 		close(results)
 	}()
 
-	collected := make([]Result, 0, len(eventIDs))
 	for r := range results {
-		collected = append(collected, r)
+		if !handle(r) {
+			cancel()
+			//nolint:revive // drain so workers blocked on send can exit
+			for range results {
+			}
+			return
+		}
 	}
+}
+
+// FetchMany collects every Result into a slice (order not guaranteed). Kept for
+// callers that don't need streaming; built on FetchManyFunc.
+func (c *Client) FetchMany(ctx context.Context, eventIDs []int) []Result {
+	collected := make([]Result, 0, len(eventIDs))
+	c.FetchManyFunc(ctx, eventIDs, func(r Result) bool {
+		collected = append(collected, r)
+		return true
+	})
 	return collected
 }
 

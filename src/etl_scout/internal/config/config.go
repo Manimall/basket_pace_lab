@@ -22,14 +22,21 @@ const (
 	defaultDBPass    = "postgres"
 	defaultDBSSLMode = "disable"
 
-	defaultBaseURL        = "https://api.sofascore.com/api/v1"
-	defaultWorkers        = 4
-	defaultRequestsPerSec = 2
+	defaultBaseURL = "https://api.sofascore.com/api/v1"
+	// Workers default to 1: Sofascore's edge rate-limits aggressively, and at
+	// 1 rps extra workers add no throughput while defeating the retry backoff
+	// (other workers keep firing during a block). Raise only for gentler hosts.
+	defaultWorkers        = 1
+	defaultRequestsPerSec = 1
 	defaultHTTPTimeout    = 15 * time.Second
 	defaultCookiesPath    = "cookies.json"
+	defaultMaxRetries     = 3               // per-request retries on 403/network
+	defaultRetryBackoff   = 3 * time.Second // exponential base: 3s, 6s, 12s …
 
-	defaultLeagues    = "NBA,EuroLeague"
-	defaultMatchLimit = 0 // 0 = no limit (enrich every matching match)
+	defaultLeagues             = "NBA,EuroLeague"
+	defaultMatchLimit          = 0   // 0 = no limit (enrich every matching match)
+	defaultMaxConsecutiveFails = 5   // circuit breaker: abort after N straight fetch failures
+	defaultProgressEvery       = 100 // emit a progress log every N processed matches
 )
 
 // Config is the fully-resolved runtime configuration.
@@ -64,12 +71,16 @@ type SofascoreConfig struct {
 	RequestsPerSec int           // global rate limit (shared across workers)
 	HTTPTimeout    time.Duration // per-request timeout
 	CookiesPath    string        // optional cookies.json to dodge edge WAF 403s
+	MaxRetries     int           // retries on 403/network before giving up on a request
+	RetryBackoff   time.Duration // exponential backoff base between retries
 }
 
 // ScoutConfig controls which matches the enrichment orchestrator targets.
 type ScoutConfig struct {
-	Leagues    []string // leagues to enrich (matched via COALESCE(tournament,'NBA'))
-	MatchLimit int      // cap on matches per run; 0 = no limit
+	Leagues             []string // leagues to enrich (matched via COALESCE(tournament,'NBA'))
+	MatchLimit          int      // cap on matches per run; 0 = no limit
+	MaxConsecutiveFails int      // circuit breaker: abort run after this many straight failures
+	ProgressEvery       int      // log progress every N processed matches
 }
 
 // Load resolves configuration from the environment, applying defaults for any
@@ -91,6 +102,22 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	maxRetries, err := getenvInt("SOFASCORE_MAX_RETRIES", defaultMaxRetries)
+	if err != nil {
+		return Config{}, err
+	}
+	retryBackoff, err := getenvDuration("SOFASCORE_RETRY_BACKOFF", defaultRetryBackoff)
+	if err != nil {
+		return Config{}, err
+	}
+	maxConsecutiveFails, err := getenvInt("SCOUT_MAX_CONSECUTIVE_FAILS", defaultMaxConsecutiveFails)
+	if err != nil {
+		return Config{}, err
+	}
+	progressEvery, err := getenvInt("SCOUT_PROGRESS_EVERY", defaultProgressEvery)
+	if err != nil {
+		return Config{}, err
+	}
 	if workers < 1 {
 		return Config{}, fmt.Errorf("SCOUT_WORKERS must be >= 1, got %d", workers)
 	}
@@ -99,6 +126,15 @@ func Load() (Config, error) {
 	}
 	if matchLimit < 0 {
 		return Config{}, fmt.Errorf("SCOUT_MATCH_LIMIT must be >= 0, got %d", matchLimit)
+	}
+	if maxRetries < 0 {
+		return Config{}, fmt.Errorf("SOFASCORE_MAX_RETRIES must be >= 0, got %d", maxRetries)
+	}
+	if maxConsecutiveFails < 1 {
+		return Config{}, fmt.Errorf("SCOUT_MAX_CONSECUTIVE_FAILS must be >= 1, got %d", maxConsecutiveFails)
+	}
+	if progressEvery < 1 {
+		return Config{}, fmt.Errorf("SCOUT_PROGRESS_EVERY must be >= 1, got %d", progressEvery)
 	}
 
 	leagues := getenvCSV("SCOUT_LEAGUES", defaultLeagues)
@@ -121,10 +157,14 @@ func Load() (Config, error) {
 			RequestsPerSec: rps,
 			HTTPTimeout:    timeout,
 			CookiesPath:    getenv("SOFASCORE_COOKIES_PATH", defaultCookiesPath),
+			MaxRetries:     maxRetries,
+			RetryBackoff:   retryBackoff,
 		},
 		Scout: ScoutConfig{
-			Leagues:    leagues,
-			MatchLimit: matchLimit,
+			Leagues:             leagues,
+			MatchLimit:          matchLimit,
+			MaxConsecutiveFails: maxConsecutiveFails,
+			ProgressEvery:       progressEvery,
 		},
 	}, nil
 }
