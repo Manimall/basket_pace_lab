@@ -49,7 +49,10 @@ func run(logger *slog.Logger, limitFlag int) error {
 	defer pool.Close()
 	logger.Info("connected to postgres", "host", cfg.DB.Host, "db", cfg.DB.Name)
 
-	client := sofascore.NewClient(cfg.Sofascore, logger)
+	client, err := sofascore.NewClient(cfg.Sofascore, logger)
+	if err != nil {
+		return err
+	}
 	defer client.Close()
 
 	limit := cfg.Scout.MatchLimit

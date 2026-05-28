@@ -17,16 +17,18 @@ func allPeriodResponse(items []model.StatisticItem) *model.StatisticsResponse {
 	}
 }
 
-// fixtureItems mirror event 12571063's ALL period (home 89, away 73).
+// fixtureItems mirror a live ALL period. Labels use real Sofascore casing and
+// punctuation on purpose ("Field goals", "3 pointers", hyphenated variants) so
+// the test exercises the mapper's lowercase + hyphen→space normalisation. Note
+// there is no "Points" item — the live statistics endpoint omits it.
 func fixtureItems() []model.StatisticItem {
 	return []model.StatisticItem{
-		{Name: statPoints, Home: "89", Away: "73"},
-		{Name: statFieldGoal, Home: "33/73", Away: "27/68"},
-		{Name: statThrees, Home: "9/24", Away: "7/21"},
-		{Name: statFreeThrow, Home: "14/18", Away: "12/17"},
-		{Name: statOffReb, Home: "11", Away: "8"},
-		{Name: statDefReb, Home: "28", Away: "24"},
-		{Name: statTurnover, Home: "10", Away: "14"},
+		{Name: "Field goals", Home: "33/73", Away: "27/68"},
+		{Name: "3-Pointers", Home: "9/24", Away: "7/21"}, // hyphen → must still match "3 pointers"
+		{Name: "Free throws", Home: "14/18", Away: "12/17"},
+		{Name: "Offensive rebounds", Home: "11", Away: "8"},
+		{Name: "Defensive rebounds", Home: "28", Away: "24"},
+		{Name: "Turnovers", Home: "10", Away: "14"},
 	}
 }
 
@@ -35,14 +37,11 @@ func TestParseMatchStatistics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.HomePoints != 89 || got.AwayPoints != 73 {
-		t.Errorf("points: got %d-%d, want 89-73", got.HomePoints, got.AwayPoints)
-	}
 	if got.Home.FieldGoals != (model.ShotStat{Made: 33, Attempted: 73}) {
 		t.Errorf("home FG: got %+v", got.Home.FieldGoals)
 	}
 	if got.Home.ThreePointers != (model.ShotStat{Made: 9, Attempted: 24}) {
-		t.Errorf("home 3P: got %+v", got.Home.ThreePointers)
+		t.Errorf("home 3P (hyphen label): got %+v", got.Home.ThreePointers)
 	}
 	if got.Away.Turnovers != 14 || got.Away.OffensiveRebounds != 8 {
 		t.Errorf("away counts: TOV %d OREB %d", got.Away.Turnovers, got.Away.OffensiveRebounds)
@@ -60,9 +59,9 @@ func TestParseMatchStatisticsMissingAllPeriod(t *testing.T) {
 
 func TestParseMatchStatisticsMalformedMetric(t *testing.T) {
 	items := fixtureItems()
-	items[1].Home = "" // break Field Goals
+	items[0].Home = "" // break Field goals
 	if _, err := ParseMatchStatistics(allPeriodResponse(items)); err == nil {
-		t.Fatal("expected error for malformed Field Goals string")
+		t.Fatal("expected error for malformed Field goals string")
 	}
 }
 

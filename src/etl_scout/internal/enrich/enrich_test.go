@@ -41,7 +41,8 @@ func (s *fakeSaver) SaveAdvancedStats(_ context.Context, _, _ int64, _ model.Adv
 	return nil
 }
 
-// goodStats is a complete box score (home 89-73) that yields valid metrics.
+// goodStats is a complete box score that yields valid metrics. Labels match the
+// live Sofascore endpoint (no "Points" item; final scores come from MatchRef).
 func goodStats() *model.StatisticsResponse {
 	item := func(name, h, a string) model.StatisticItem {
 		return model.StatisticItem{Name: name, Home: h, Away: a}
@@ -50,12 +51,11 @@ func goodStats() *model.StatisticsResponse {
 		Statistics: []model.PeriodStatistics{{
 			Period: "ALL",
 			Groups: []model.StatisticGroup{{Items: []model.StatisticItem{
-				item("Points", "89", "73"),
-				item("Field Goals", "33/73", "27/68"),
-				item("3-Pointers", "9/24", "7/21"),
-				item("Free Throws", "14/18", "12/17"),
-				item("Offensive Rebounds", "11", "8"),
-				item("Defensive Rebounds", "28", "24"),
+				item("Field goals", "33/73", "27/68"),
+				item("3 pointers", "9/24", "7/21"),
+				item("Free throws", "14/18", "12/17"),
+				item("Offensive rebounds", "11", "8"),
+				item("Defensive rebounds", "28", "24"),
 				item("Turnovers", "10", "14"),
 			}}},
 		}},
@@ -63,7 +63,11 @@ func goodStats() *model.StatisticsResponse {
 }
 
 func ref(id int64, eventID int) storage.MatchRef {
-	return storage.MatchRef{ID: id, EventID: eventID, HomeTeamID: id*10 + 1, AwayTeamID: id*10 + 2}
+	return storage.MatchRef{
+		ID: id, EventID: eventID,
+		HomeTeamID: id*10 + 1, AwayTeamID: id*10 + 2,
+		HomeScore: 89, AwayScore: 73,
+	}
 }
 
 func TestRunEnrichesGoodMatch(t *testing.T) {

@@ -6,12 +6,15 @@ import (
 )
 
 // MatchRef is the minimal match identity the enricher needs: our internal id,
-// the Sofascore event id to fetch, and both team ids to attribute box scores.
+// the Sofascore event id to fetch, both team ids, and the final scores (the
+// statistics endpoint omits points, so ORtg/DRtg use these DB-sourced totals).
 type MatchRef struct {
 	ID         int64 // matches.id (FK target for team_match_advanced)
 	EventID    int   // Sofascore event id (matches.external_id, numeric)
 	HomeTeamID int64
 	AwayTeamID int64
+	HomeScore  int
+	AwayScore  int
 }
 
 // matchesNeedingAdvancedSQL selects finished matches for the given leagues that
@@ -19,10 +22,12 @@ type MatchRef struct {
 // Leagues are matched via the project convention COALESCE(tournament,'NBA').
 // external_id is constrained to numeric so the ::bigint cast is always safe.
 const matchesNeedingAdvancedSQL = `
-SELECT m.id, m.external_id::bigint, m.home_team_id, m.away_team_id
+SELECT m.id, m.external_id::bigint, m.home_team_id, m.away_team_id,
+       m.home_score_final, m.away_score_final
 FROM matches m
 WHERE COALESCE(m.tournament_name, 'NBA') = ANY($1)
   AND m.home_score_final IS NOT NULL
+  AND m.away_score_final IS NOT NULL
   AND m.external_id ~ '^[0-9]+$'
   AND NOT EXISTS (
         SELECT 1 FROM team_match_advanced t WHERE t.match_id = m.id
@@ -42,7 +47,7 @@ func (p *Pool) FetchMatchesNeedingAdvanced(ctx context.Context, leagues []string
 	var refs []MatchRef
 	for rows.Next() {
 		var r MatchRef
-		if err := rows.Scan(&r.ID, &r.EventID, &r.HomeTeamID, &r.AwayTeamID); err != nil {
+		if err := rows.Scan(&r.ID, &r.EventID, &r.HomeTeamID, &r.AwayTeamID, &r.HomeScore, &r.AwayScore); err != nil {
 			return nil, fmt.Errorf("scan match ref: %w", err)
 		}
 		refs = append(refs, r)

@@ -102,13 +102,15 @@ func (e *Enricher) process(ctx context.Context, ref storage.MatchRef, res sofasc
 		return outcomeSkipped
 	}
 
-	homeAdv, err := stats.Home.ComputeAdvanced(stats.HomePoints, stats.AwayPoints)
+	// Points come from the DB (statistics endpoint omits them): home ORtg uses
+	// home points scored vs away points allowed, and vice versa for the away side.
+	homeAdv, err := stats.Home.ComputeAdvanced(ref.HomeScore, ref.AwayScore)
 	if err != nil {
 		e.log.Warn("incomplete home box score; skipping",
 			"match_id", ref.ID, "event_id", ref.EventID, "reason", err)
 		return outcomeSkipped
 	}
-	awayAdv, err := stats.Away.ComputeAdvanced(stats.AwayPoints, stats.HomePoints)
+	awayAdv, err := stats.Away.ComputeAdvanced(ref.AwayScore, ref.HomeScore)
 	if err != nil {
 		e.log.Warn("incomplete away box score; skipping",
 			"match_id", ref.ID, "event_id", ref.EventID, "reason", err)

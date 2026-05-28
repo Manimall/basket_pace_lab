@@ -9,22 +9,33 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	http "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
+	"github.com/bogdanfinn/tls-client/profiles"
 
 	"basket_pace_lab/etl_scout/internal/config"
 	"basket_pace_lab/etl_scout/internal/model"
 )
 
-// Browser-imitating headers reduce the odds of a 403 from the edge WAF.
+// clientProfile is the TLS/HTTP2 fingerprint we impersonate. Sofascore's Varnish
+// edge fingerprints precisely: only the Chrome 124 profile over HTTP/2 passes —
+// Chrome 120/131/133 and forced HTTP/1.1 all get a 403. This mirrors the Python
+// side's curl_cffi impersonate="chrome124". Re-verify if Sofascore tightens.
+var clientProfile = profiles.Chrome_124
+
+// Browser-imitating headers reduce the odds of a 403 from the edge WAF. The
+// User-Agent must match clientProfile so the JA3 and the UA tell one story.
 var defaultHeaders = map[string]string{
 	"Accept":          "application/json, text/plain, */*",
 	"Accept-Language": "en-US,en;q=0.9",
 	"Origin":          "https://www.sofascore.com",
 	"Referer":         "https://www.sofascore.com/",
 	"Cache-Control":   "no-cache",
+	"User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 }
 
 const statusOK = http.StatusOK
@@ -44,15 +55,29 @@ type cookie struct {
 // concurrency never translates into a request burst that trips IP blocking.
 type Client struct {
 	cfg          config.SofascoreConfig
-	http         *http.Client
+	http         tls_client.HttpClient
 	limiter      *time.Ticker
 	log          *slog.Logger
 	cookieHeader string
 }
 
-// NewClient builds a Client. Close() must be called to release the ticker.
-func NewClient(cfg config.SofascoreConfig, log *slog.Logger) *Client {
+// NewClient builds a Client with a Chrome-impersonating TLS transport. Close()
+// must be called to release the ticker.
+func NewClient(cfg config.SofascoreConfig, log *slog.Logger) (*Client, error) {
 	interval := time.Second / time.Duration(cfg.RequestsPerSec)
+
+	timeoutSecs := int(cfg.HTTPTimeout.Seconds())
+	if timeoutSecs < 1 {
+		timeoutSecs = 1
+	}
+	httpClient, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+		tls_client.WithClientProfile(clientProfile),
+		tls_client.WithTimeoutSeconds(timeoutSecs),
+		tls_client.WithNotFollowRedirects(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build tls client: %w", err)
+	}
 
 	cookieHeader, err := loadCookieHeader(cfg.CookiesPath)
 	switch {
@@ -66,11 +91,11 @@ func NewClient(cfg config.SofascoreConfig, log *slog.Logger) *Client {
 
 	return &Client{
 		cfg:          cfg,
-		http:         &http.Client{Timeout: cfg.HTTPTimeout},
+		http:         httpClient,
 		limiter:      time.NewTicker(interval),
 		log:          log,
 		cookieHeader: cookieHeader,
-	}
+	}, nil
 }
 
 // loadCookieHeader renders a "name=value; …" Cookie header from a browser

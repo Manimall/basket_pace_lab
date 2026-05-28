@@ -19,13 +19,18 @@ func quietLogger() *slog.Logger {
 
 const fixtureStats = `{"statistics":[{"period":"ALL","groups":[]}]}`
 
-func newTestClient(baseURL string, workers, rps int) *Client {
-	return NewClient(config.SofascoreConfig{
+func newTestClient(t *testing.T, baseURL string, workers, rps int) *Client {
+	t.Helper()
+	c, err := NewClient(config.SofascoreConfig{
 		BaseURL:        baseURL,
 		Workers:        workers,
 		RequestsPerSec: rps,
 		HTTPTimeout:    5 * time.Second,
 	}, quietLogger())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return c
 }
 
 func TestFetchManyReturnsAllResults(t *testing.T) {
@@ -38,7 +43,7 @@ func TestFetchManyReturnsAllResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := newTestClient(srv.URL, 3, 100)
+	client := newTestClient(t, srv.URL, 3, 100)
 	defer client.Close()
 
 	ids := []int{1, 2, 3, 4, 5}
@@ -67,7 +72,7 @@ func TestFetchStatisticsPropagatesHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := newTestClient(srv.URL, 1, 100)
+	client := newTestClient(t, srv.URL, 1, 100)
 	defer client.Close()
 
 	_, err := client.FetchStatistics(context.Background(), 42)
@@ -86,7 +91,7 @@ func TestFetchManyRespectsRateLimit(t *testing.T) {
 
 	// rps=10 → 100ms between ticks. 5 requests across 2 workers must still be
 	// globally throttled, so total time is bounded below by the ticker.
-	client := newTestClient(srv.URL, 2, 10)
+	client := newTestClient(t, srv.URL, 2, 10)
 	defer client.Close()
 
 	start := time.Now()
@@ -110,7 +115,7 @@ func TestFetchManyHonoursContextCancellation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := newTestClient(srv.URL, 2, 1) // slow: 1 rps
+	client := newTestClient(t, srv.URL, 2, 1) // slow: 1 rps
 	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
