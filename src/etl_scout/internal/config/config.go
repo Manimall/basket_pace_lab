@@ -39,6 +39,10 @@ const (
 	defaultProgressEvery       = 100          // emit a progress log every N processed matches
 	defaultSeasonStart         = "2025-08-01" // mirror Python features.current_season_start
 	seasonDateLayout           = "2006-01-02"
+	// --loop mode cooldown: how long to sleep after a circuit-breaker abort
+	// (sustained 403 / IP throttle) before resuming. Long enough for the
+	// Sofascore rolling-hour budget to drain.
+	defaultLoopCooldown = 45 * time.Minute
 )
 
 // Config is the fully-resolved runtime configuration.
@@ -79,11 +83,12 @@ type SofascoreConfig struct {
 
 // ScoutConfig controls which matches the enrichment orchestrator targets.
 type ScoutConfig struct {
-	Leagues             []string // leagues to enrich (matched via COALESCE(tournament,'NBA'))
-	MatchLimit          int      // cap on matches per run; 0 = no limit
-	MaxConsecutiveFails int      // circuit breaker: abort run after this many straight failures
-	ProgressEvery       int      // log progress every N processed matches
-	SeasonStart         string   // only enrich matches scheduled on/after this date (YYYY-MM-DD)
+	Leagues             []string      // leagues to enrich (matched via COALESCE(tournament,'NBA'))
+	MatchLimit          int           // cap on matches per run; 0 = no limit
+	MaxConsecutiveFails int           // circuit breaker: abort run after this many straight failures
+	ProgressEvery       int           // log progress every N processed matches
+	SeasonStart         string        // only enrich matches scheduled on/after this date (YYYY-MM-DD)
+	LoopCooldown        time.Duration // --loop mode: sleep after a breaker abort before resuming
 }
 
 // Load resolves configuration from the environment, applying defaults for any
@@ -121,6 +126,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	loopCooldown, err := getenvDuration("SCOUT_LOOP_COOLDOWN", defaultLoopCooldown)
+	if err != nil {
+		return Config{}, err
+	}
 	if workers < 1 {
 		return Config{}, fmt.Errorf("SCOUT_WORKERS must be >= 1, got %d", workers)
 	}
@@ -138,6 +147,9 @@ func Load() (Config, error) {
 	}
 	if progressEvery < 1 {
 		return Config{}, fmt.Errorf("SCOUT_PROGRESS_EVERY must be >= 1, got %d", progressEvery)
+	}
+	if loopCooldown <= 0 {
+		return Config{}, fmt.Errorf("SCOUT_LOOP_COOLDOWN must be > 0, got %s", loopCooldown)
 	}
 
 	leagues := getenvCSV("SCOUT_LEAGUES", defaultLeagues)
@@ -174,6 +186,7 @@ func Load() (Config, error) {
 			MaxConsecutiveFails: maxConsecutiveFails,
 			ProgressEvery:       progressEvery,
 			SeasonStart:         seasonStart,
+			LoopCooldown:        loopCooldown,
 		},
 	}, nil
 }

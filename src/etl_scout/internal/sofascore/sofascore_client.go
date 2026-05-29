@@ -19,6 +19,7 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 
 	"basket_pace_lab/etl_scout/internal/config"
+	"basket_pace_lab/etl_scout/internal/ctxutil"
 	"basket_pace_lab/etl_scout/internal/model"
 )
 
@@ -139,18 +140,6 @@ func jitter() time.Duration {
 	return time.Duration(rand.Int63n(int64(maxJitter)))
 }
 
-// sleepCtx sleeps for d unless the context is cancelled first.
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
-
 // FetchStatistics retrieves the period-split statistics for one event, retrying
 // transient failures (403 throttle, network) with exponential backoff + jitter.
 // A 404 (ErrNoStatistics) and context cancellation are returned immediately —
@@ -162,7 +151,7 @@ func (c *Client) FetchStatistics(ctx context.Context, eventID int) (*model.Stati
 		if attempt > 0 {
 			backoff := c.cfg.RetryBackoff*time.Duration(1<<(attempt-1)) + jitter()
 			c.log.Debug("retrying after backoff", "event_id", eventID, "attempt", attempt, "backoff", backoff)
-			if err := sleepCtx(ctx, backoff); err != nil {
+			if err := ctxutil.Sleep(ctx, backoff); err != nil {
 				return nil, err
 			}
 		}
