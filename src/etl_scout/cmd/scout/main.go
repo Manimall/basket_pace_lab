@@ -60,17 +60,17 @@ func run(logger *slog.Logger, limitFlag int) error {
 		limit = limitFlag
 	}
 
-	refs, err := pool.FetchMatchesNeedingAdvanced(ctx, cfg.Scout.Leagues, limit)
+	refs, err := pool.FetchMatchesNeedingAdvanced(ctx, cfg.Scout.Leagues, cfg.Scout.SeasonStart, limit)
 	if err != nil {
 		return err
 	}
 	if len(refs) == 0 {
-		logger.Info("nothing to enrich", "leagues", cfg.Scout.Leagues)
+		logger.Info("nothing to enrich", "leagues", cfg.Scout.Leagues, "season_start", cfg.Scout.SeasonStart)
 		return nil
 	}
 
 	logger.Info("starting enrichment",
-		"matches", len(refs), "leagues", cfg.Scout.Leagues,
+		"matches", len(refs), "leagues", cfg.Scout.Leagues, "season_start", cfg.Scout.SeasonStart,
 		"workers", cfg.Sofascore.Workers, "rps", cfg.Sofascore.RequestsPerSec)
 
 	start := time.Now()

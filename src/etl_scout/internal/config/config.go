@@ -34,9 +34,11 @@ const (
 	defaultRetryBackoff   = 3 * time.Second // exponential base: 3s, 6s, 12s …
 
 	defaultLeagues             = "NBA,EuroLeague"
-	defaultMatchLimit          = 0   // 0 = no limit (enrich every matching match)
-	defaultMaxConsecutiveFails = 5   // circuit breaker: abort after N straight fetch failures
-	defaultProgressEvery       = 100 // emit a progress log every N processed matches
+	defaultMatchLimit          = 0            // 0 = no limit (enrich every matching match)
+	defaultMaxConsecutiveFails = 5            // circuit breaker: abort after N straight fetch failures
+	defaultProgressEvery       = 100          // emit a progress log every N processed matches
+	defaultSeasonStart         = "2025-08-01" // mirror Python features.current_season_start
+	seasonDateLayout           = "2006-01-02"
 )
 
 // Config is the fully-resolved runtime configuration.
@@ -81,6 +83,7 @@ type ScoutConfig struct {
 	MatchLimit          int      // cap on matches per run; 0 = no limit
 	MaxConsecutiveFails int      // circuit breaker: abort run after this many straight failures
 	ProgressEvery       int      // log progress every N processed matches
+	SeasonStart         string   // only enrich matches scheduled on/after this date (YYYY-MM-DD)
 }
 
 // Load resolves configuration from the environment, applying defaults for any
@@ -142,6 +145,11 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("SCOUT_LEAGUES resolved to an empty list")
 	}
 
+	seasonStart := getenv("SCOUT_SEASON_START", defaultSeasonStart)
+	if _, err := time.Parse(seasonDateLayout, seasonStart); err != nil {
+		return Config{}, fmt.Errorf("SCOUT_SEASON_START %q must be YYYY-MM-DD: %w", seasonStart, err)
+	}
+
 	return Config{
 		DB: DBConfig{
 			Host:     getenv("DB_HOST", defaultDBHost),
@@ -165,6 +173,7 @@ func Load() (Config, error) {
 			MatchLimit:          matchLimit,
 			MaxConsecutiveFails: maxConsecutiveFails,
 			ProgressEvery:       progressEvery,
+			SeasonStart:         seasonStart,
 		},
 	}, nil
 }
