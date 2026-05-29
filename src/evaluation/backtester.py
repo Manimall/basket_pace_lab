@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import numpy as np
 import pandas as pd
+from sklearn.metrics import log_loss, roc_auc_score
 
 from src.config import settings
 from src.evaluation.config import BIN_TARGET, LINE_COL, PIPELINES, PipelineSpec
@@ -149,6 +151,13 @@ def run_pipeline(
     probs   = model.predict_proba(X_te)[:, 1]
     actuals = test_df[TARGET].to_numpy()
     lines   = test_df[LINE_COL].to_numpy()
+
+    # Classification quality on the held-out test set (independent of bet logic).
+    y_te = test_df[BIN_TARGET].astype(int).to_numpy()
+    ll   = log_loss(y_te, probs, labels=[0, 1])
+    auc  = roc_auc_score(y_te, probs) if len(np.unique(y_te)) > 1 else float("nan")
+    log.info("[%s] test metrics: LogLoss=%.4f  ROC-AUC=%.4f  (n=%d, features=%d)",
+             spec.name, ll, auc, len(y_te), X_te.shape[1])
 
     return run_threshold_sweep(probs, actuals, lines, params)
 

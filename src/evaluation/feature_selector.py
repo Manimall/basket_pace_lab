@@ -25,6 +25,7 @@ from src.features.advanced_metrics import ADVANCED_FEAT_COLS
 from src.features.arena_context import ARENA_FEAT_COLS
 from src.features.fatigue import FATIGUE_FEATURE_COLS
 from src.features.score_features import BM_COLS
+from src.features.team_advanced import TEAM_ADV_FEAT_COLS
 
 log = logging.getLogger(__name__)
 
@@ -43,11 +44,16 @@ class FeatureGroup(StrEnum):
             (multicollinearity) and add noise — disabled by default.
         ARENA: V8 home-court fortress / away vulnerability indices. European
             leagues have strong home-court regimes; enabled there, off for NBA.
+        TEAM_ADV: Box-score advanced metrics (ORtg/DRtg/true_pace/3PA/3PA-rate,
+            rolled L5+EMA) sourced from team_match_advanced (Go scout). Real
+            efficiency signal for leagues the box score was scraped for —
+            currently EuroLeague (current season fully backfilled).
     """
     BASE     = "base"
     FATIGUE  = "fatigue"
     ADVANCED = "advanced"
     ARENA    = "arena"
+    TEAM_ADV = "team_adv"
 
 
 # Leagues with structurally strong home-court advantage (European hardcore):
@@ -64,9 +70,12 @@ _ARENA_LEAGUES: tuple[str, ...] = (
 # separate validation.
 FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
     "NBA": frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
+    # EuroLeague: box-score advanced backfilled (current season) → TEAM_ADV on.
+    "EuroLeague": frozenset({FeatureGroup.BASE, FeatureGroup.ARENA, FeatureGroup.TEAM_ADV}),
     **{
         league: frozenset({FeatureGroup.BASE, FeatureGroup.ARENA})
         for league in _ARENA_LEAGUES
+        if league != "EuroLeague"
     },
 }
 
@@ -80,6 +89,7 @@ _GROUP_COLUMNS: dict[FeatureGroup, frozenset[str]] = {
     FeatureGroup.FATIGUE:  frozenset(FATIGUE_FEATURE_COLS),
     FeatureGroup.ADVANCED: frozenset(ADVANCED_FEAT_COLS),
     FeatureGroup.ARENA:    frozenset(ARENA_FEAT_COLS),
+    FeatureGroup.TEAM_ADV: frozenset(TEAM_ADV_FEAT_COLS),
 }
 
 # Columns always hidden from the model (V4 invariant — line-derived).
