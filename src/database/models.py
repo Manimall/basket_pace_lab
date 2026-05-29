@@ -234,7 +234,7 @@ class TeamMatchAdvanced(Base):
         BigInteger, ForeignKey("matches.id", ondelete="CASCADE"), primary_key=True
     )
     team_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("teams.id", ondelete="RESTRICT"), primary_key=True
+        BigInteger, ForeignKey("teams.id", ondelete="RESTRICT"), primary_key=True, index=True
     )
 
     possessions:              Mapped[Optional[float]] = mapped_column(Float)
