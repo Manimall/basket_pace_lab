@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.features.rolling_utils import (
     EMA_SPAN,
@@ -20,7 +19,6 @@ from src.features.rolling_utils import (
     compute_rolling_ema,
     fill_feature_nans,
 )
-
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -132,7 +130,6 @@ def test_fill_feature_nans_skips_missing_columns():
 
 def _make_match_df() -> pd.DataFrame:
     """Minimal match-level DataFrame with precomputed rolling _L5 columns."""
-    avg_pts = 110.0
     return pd.DataFrame({
         "league":                  ["NBA", "NBA"],
         "home_score_final":        [110.0, 105.0],

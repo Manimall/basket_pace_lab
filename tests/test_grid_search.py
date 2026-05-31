@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import pandas as pd
 
 from src.evaluation.config import BIN_TARGET, LINE_COL
@@ -20,10 +19,9 @@ from src.evaluation.grid_search.cell import (
 )
 from src.evaluation.grid_search.periods import COMBOS, GRID_THRESHOLDS, PERIOD_CONFIGS
 from src.evaluation.grid_search.tables import build_full_table, build_winner_table
+from src.evaluation.simulation import BetReport
 from src.features.fatigue import FATIGUE_FEATURE_COLS
 from src.features.team_advanced import TEAM_ADV_FEAT_COLS
-from src.evaluation.simulation import BetReport
-
 
 # ── periods config ────────────────────────────────────────────────────────────
 

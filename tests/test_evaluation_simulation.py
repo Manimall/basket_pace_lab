@@ -21,7 +21,6 @@ from src.evaluation.simulation import (
     simulate,
 )
 
-
 _ODDS  = 1.90
 _STAKE = 1.0
 _WIN   = _STAKE * (_ODDS - 1.0)

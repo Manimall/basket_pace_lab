@@ -244,7 +244,7 @@ async def probe(event_id: str) -> None:
         follow_redirects=True,
         timeout=15.0,
     ) as client:
-        print(f"  Sending GET request…")
+        print("  Sending GET request…")
         try:
             response = await client.get(url)
         except httpx.ConnectError as exc:

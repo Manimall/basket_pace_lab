@@ -44,7 +44,7 @@ class MassScheduler(BaseCollector):
     ) -> None:
         self._sf            = session_factory or get_session_factory()
         self._max_pages     = max_pages
-        self._league_filter = [l.upper() for l in league_filter] if league_filter else None
+        self._league_filter = [lg.upper() for lg in league_filter] if league_filter else None
         self._season_filter = season_filter
         self._dry_run       = dry_run
 
@@ -126,10 +126,14 @@ class MassScheduler(BaseCollector):
                         log.debug("%s  event %d error: %s", tag, event_id, str(exc)[:120])
                         result = "error"
 
-                    if result == "ok":       ok     += 1
-                    elif result == "exists": exists += 1
-                    elif result == "error":  pass
-                    else:                    skip   += 1
+                    if result == "ok":
+                        ok += 1
+                    elif result == "exists":
+                        exists += 1
+                    elif result == "error":
+                        pass
+                    else:
+                        skip += 1
 
                     if i % 20 == 0 or i == len(event_ids):
                         elapsed = time.monotonic() - t0

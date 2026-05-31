@@ -1,0 +1,17 @@
+# Test / CI dependencies.
+#
+# Installs the full production stack plus the two packages the test suite needs
+# that are intentionally kept out of requirements.txt:
+#   - pytest:   test runner (not a runtime dependency)
+#   - catboost: ML engine imported at module load by the evaluation/models code
+#               that the tests exercise; left out of requirements.txt because its
+#               wheel build is slow and it is installed separately in deployment.
+-r requirements.txt
+
+pytest>=8.0
+pytest-cov>=5.0
+catboost>=1.2.5
+
+# Static analysis (lint + type-check), run in CI before the test suite.
+ruff>=0.6
+mypy>=1.10

@@ -17,9 +17,9 @@ import sys
 from sqlalchemy import select, text
 
 from src.config import settings
+from src.data_collection.sofascore_client import SofascoreClient
 from src.database.engine import create_tables, dispose_engine, get_session_factory
 from src.database.models import Match, QuarterStats, Team
-from src.data_collection.sofascore_client import SofascoreClient
 
 logging.basicConfig(
     level=logging.INFO,

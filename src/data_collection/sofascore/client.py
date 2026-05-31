@@ -19,9 +19,6 @@ from typing import Any
 from curl_cffi.requests import AsyncSession
 from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
-from src.database import crud
-from src.database.crud import QuarterStatRow
-from src.database.models import MatchStatus, SeasonType
 from src.data_collection.sofascore.parsers import (
     PERIOD_MAP,
     _calc_pace,
@@ -30,6 +27,9 @@ from src.data_collection.sofascore.parsers import (
     parse_shot,
     safe_int,
 )
+from src.database import crud
+from src.database.crud import QuarterStatRow
+from src.database.models import MatchStatus, SeasonType
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,9 @@ class SofascoreClient:
 
     async def __aenter__(self) -> "SofascoreClient":
         if not self._mock:
-            self._session = AsyncSession(impersonate=self._impersonate, headers=HEADERS)
+            # _impersonate is a curl_cffi profile string; curl_cffi types the
+            # param as a Literal, so a plain str needs an explicit ignore.
+            self._session = AsyncSession(impersonate=self._impersonate, headers=HEADERS)  # type: ignore[arg-type]
             await self._load_saved_cookies()
         else:
             log.info("Mock mode: API requests replaced with local fixtures")

@@ -8,7 +8,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import sys
 from datetime import datetime, timezone
@@ -19,9 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 
 from src.data_collection.base import BaseCollector
 from src.data_collection.chinanbl.page import (
-    SEASONS, TOURNAMENT_ID, TOURNAMENT_NAME,
-    _SofaApiPage, _safe_int,
-    extract_game_stats_row, extract_ot_rows, extract_quarter_rows,
+    SEASONS,
+    TOURNAMENT_NAME,
+    _safe_int,
+    _SofaApiPage,
+    extract_game_stats_row,
+    extract_ot_rows,
+    extract_quarter_rows,
 )
 from src.data_collection.constants import DEFAULT_USER_AGENT
 from src.database import crud

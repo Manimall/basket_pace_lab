@@ -13,10 +13,10 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import random
-import argparse
 import sys
 import time
 
@@ -26,7 +26,9 @@ from src.config import settings
 from src.data_collection.base import BaseCollector
 from src.data_collection.constants import FLASHSCORE_BASE_URL, USER_AGENTS
 from src.data_collection.flashscore.collector_page import (
-    COLLECTOR_LEAGUES, FsCollectedMatch, save_match, scrape_results_page,
+    COLLECTOR_LEAGUES,
+    save_match,
+    scrape_results_page,
 )
 from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
@@ -107,7 +109,9 @@ class FlashscoreCollector(BaseCollector):
                                  time.monotonic() - t0)
 
                 log.info("[%s]  DONE  ok=%d  skip=%d  err=%d", league_key, ok, skip, err)
-                grand_ok += ok; grand_skip += skip; grand_err += err
+                grand_ok += ok
+                grand_skip += skip
+                grand_err += err
 
             await browser.close()
 

@@ -21,19 +21,30 @@ import logging
 import random
 import sys
 import time
-from typing import Any
 
 from playwright.async_api import async_playwright
 
 from src.config import settings
 from src.data_collection.base import BaseCollector
 from src.data_collection.constants import FLASHSCORE_BASE_URL, USER_AGENTS
-from src.data_collection.flashscore.db import ensure_flashscore_id_column, load_db_matches, save_enriched
+from src.data_collection.flashscore.db import (
+    ensure_flashscore_id_column,
+    load_db_matches,
+    save_enriched,
+)
 from src.data_collection.flashscore.norm import (  # noqa: F401 — re-exported for test backward compat
-    DbMatch, FsMatch, QScore, _NAME_ALIASES, _norm, _sim,
+    _NAME_ALIASES,
+    DbMatch,
+    FsMatch,
+    QScore,
+    _norm,
+    _sim,
 )
 from src.data_collection.flashscore.page import (
-    LEAGUE_PATHS, build_league_index, build_quarter_rows, find_match,
+    LEAGUE_PATHS,
+    build_league_index,
+    build_quarter_rows,
+    find_match,
 )
 from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 

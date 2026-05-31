@@ -23,7 +23,6 @@ from src.features.advanced_metrics import (
 )
 from src.features.score_features import ALL_FEAT, _build_team_timeline
 
-
 # ── H2 universal feature ──────────────────────────────────────────────────────
 
 

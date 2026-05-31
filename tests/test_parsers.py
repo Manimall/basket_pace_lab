@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from src.data_collection.flashscore_enricher import _NAME_ALIASES, _norm, _sim
 
-
 # ── _norm ──────────────────────────────────────────────────────────────────────
 
 

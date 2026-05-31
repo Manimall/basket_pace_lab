@@ -22,7 +22,6 @@ from src.features.arena_context import (
     add_arena_context,
 )
 
-
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 

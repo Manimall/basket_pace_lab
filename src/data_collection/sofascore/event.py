@@ -12,18 +12,17 @@ from typing import Any
 from playwright.async_api import Page
 from sqlalchemy import text
 
-from src.database import crud
-from src.database.engine import SessionFactory
-from src.database.crud import QuarterStatRow
-from src.database.models import MatchStatus, SeasonType
 from src.data_collection.constants import SOFASCORE_API_HEADERS
 from src.data_collection.sofascore.parsers import (
-    PERIOD_MAP,
     SCORE_KEY_MAP,
     parse_full_game,
     parse_period,
     safe_int,
 )
+from src.database import crud
+from src.database.crud import QuarterStatRow
+from src.database.engine import SessionFactory
+from src.database.models import MatchStatus, SeasonType
 
 log = logging.getLogger(__name__)
 
