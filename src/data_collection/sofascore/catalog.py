@@ -125,4 +125,23 @@ LEAGUE_CATALOG: dict[str, dict] = {
             {"id": 54374, "name": "B1 League 23/24", "code": "2324"},
         ],
     },
+    # ── Leagues added for sofascore_id_finder (previously Flashscore-only) ──
+    # VERIFY: confirm tournament_id on sofascore.com before running id_finder.
+    "ABA": {
+        # AdmiralBet ABA League — sofascore.com/basketball/europe/admiralbet-aba-league
+        "tournament_id": 1464,
+        "seasons": [
+            {"id": 80561, "name": "ABA League 25/26", "code": "2526"},
+            {"id": 64592, "name": "ABA League 24/25", "code": "2425"},
+            {"id": 53085, "name": "ABA League 23/24", "code": "2324"},
+        ],
+    },
+    "Israel": {
+        # Israeli Premier League — sofascore.com/basketball/israel/premier-league
+        "tournament_id": 253,
+        "seasons": [
+            {"id": 80687, "name": "Israel Premier 25/26", "code": "2526"},
+            {"id": 64791, "name": "Israel Premier 24/25", "code": "2425"},
+        ],
+    },
 }
