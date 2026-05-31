@@ -126,22 +126,24 @@ LEAGUE_CATALOG: dict[str, dict] = {
         ],
     },
     # ── Leagues added for sofascore_id_finder (previously Flashscore-only) ──
-    # VERIFY: confirm tournament_id on sofascore.com before running id_finder.
     "ABA": {
-        # AdmiralBet ABA League — sofascore.com/basketball/europe/admiralbet-aba-league
-        "tournament_id": 1464,
+        # AdmiralBet ABA League
+        # sofascore.com/basketball/tournament/international/admiralbet-aba-league/235
+        "tournament_id": 235,
         "seasons": [
-            {"id": 80561, "name": "ABA League 25/26", "code": "2526"},
-            {"id": 64592, "name": "ABA League 24/25", "code": "2425"},
-            {"id": 53085, "name": "ABA League 23/24", "code": "2324"},
+            {"id": 80150, "name": "AdmiralBet ABA League 25/26", "code": "2526"},
+            {"id": 61743, "name": "Liga ABA 24/25",              "code": "2425"},
+            {"id": 53473, "name": "Liga ABA 23/24",              "code": "2324"},
         ],
     },
     "Israel": {
-        # Israeli Premier League — sofascore.com/basketball/israel/premier-league
-        "tournament_id": 253,
+        # Israeli Basketball Super League
+        # sofascore.com/basketball/tournament/israel/super-league/1197
+        "tournament_id": 1197,
         "seasons": [
-            {"id": 80687, "name": "Israel Premier 25/26", "code": "2526"},
-            {"id": 64791, "name": "Israel Premier 24/25", "code": "2425"},
+            {"id": 81980, "name": "Super League 25/26", "code": "2526"},
+            {"id": 66111, "name": "Super League 24/25", "code": "2425"},
+            {"id": 54443, "name": "Super League 23/24", "code": "2324"},
         ],
     },
 }
