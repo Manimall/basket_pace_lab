@@ -199,3 +199,34 @@ def test_nba_base_feature_not_excluded():
     excluded = get_excluded_features("NBA")
     assert "home_pts_scored_h2_L3" not in excluded
     assert "away_pts_allowed_h2_EMA5" not in excluded
+
+
+# ── Inference layer: run_league_backtest blocks unprofitable leagues ──────────
+
+def test_run_league_backtest_skips_unprofitable_league(caplog):
+    """run_league_backtest must return None and log SKIP for CBA/ACB."""
+    from unittest.mock import patch
+    from src.evaluation.backtest_league import run_league_backtest
+
+    # Patch prepare_dataset so the test never hits the DB
+    with patch("src.evaluation.backtest_league.prepare_dataset") as mock_ds, \
+         caplog.at_level(logging.WARNING, logger="src.evaluation.backtest_league"):
+        result = run_league_backtest("CBA")
+
+    assert result is None, "Unprofitable league must return None, not a BetReport list"
+    mock_ds.assert_not_called(), "prepare_dataset must NOT be called for unprofitable leagues"
+    assert any("SKIP" in r.message and "UNPROFITABLE" in r.message for r in caplog.records), \
+        "Expected WARNING with 'SKIP' and 'UNPROFITABLE' in message"
+
+
+def test_run_league_backtest_skips_acb(caplog):
+    from unittest.mock import patch
+    from src.evaluation.backtest_league import run_league_backtest
+
+    with patch("src.evaluation.backtest_league.prepare_dataset") as mock_ds, \
+         caplog.at_level(logging.WARNING, logger="src.evaluation.backtest_league"):
+        result = run_league_backtest("ACB")
+
+    assert result is None
+    mock_ds.assert_not_called()
+    assert any("SKIP" in r.message for r in caplog.records)
