@@ -24,68 +24,17 @@ from playwright.async_api import async_playwright
 from sqlalchemy import text
 
 from src.data_collection.base import BaseCollector
-from src.data_collection.constants import FLASHSCORE_BASE_URL
 from src.data_collection.flashscore.browser import make_flashscore_session
+from src.data_collection.flashscore.id_matcher_config import (
+    MATCH_THRESHOLD,
+    LeagueConfig,
+    LEAGUES,
+)
 from src.data_collection.flashscore.norm import FsMatch, _norm, _sim
 from src.data_collection.flashscore.page import build_index_from_url, find_match
 from src.database.engine import dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
-
-_MATCH_THRESHOLD = 0.45
-
-
-@dataclass(frozen=True)
-class _LeagueConfig:
-    db_filter: str      # WHERE fragment; alias 'm' refers to the matches table
-    fs_urls: list[str]  # full Flashscore results-page URLs (multiple = merged index)
-
-
-_LEAGUES: dict[str, _LeagueConfig] = {
-    "NBA": _LeagueConfig(
-        db_filter="m.tournament_name IS NULL",
-        fs_urls=[
-            # Current season (2025-26)
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba/results/",
-            # Previous season — most unmatched records are from 2024-25
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba-2024-2025/results/",
-            # NBA Cup (In-Season Tournament) is on its own page
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba-cup/results/",
-            # Playoffs — separate page
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba-playoffs/results/",
-        ],
-    ),
-    "BLeague": _LeagueConfig(
-        db_filter="m.tournament_name = 'BLeague'",
-        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/japan/b-league/results/"],
-    ),
-    "ChinaNBL": _LeagueConfig(
-        db_filter="m.tournament_name = 'ChinaNBL'",
-        # NOTE: Flashscore may not cover this league; URL is best-effort
-        fs_urls=[
-            FLASHSCORE_BASE_URL + "/basketball/china/nbl/results/",
-            FLASHSCORE_BASE_URL + "/basketball/china/nbl-2/results/",
-        ],
-    ),
-    "LNBP": _LeagueConfig(
-        db_filter="m.tournament_name = 'LNBP'",
-        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/mexico/lnbp/results/"],
-    ),
-    "ABA": _LeagueConfig(
-        db_filter="m.tournament_name = 'ABA'",
-        fs_urls=[
-            # Current season (2025/26) — sponsor naming "AdmiralBet ABA League"
-            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league/results/",
-            # Previous seasons — kept for historical matching when archive data is ingested
-            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2024-2025/results/",
-            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2023-2024/results/",
-        ],
-    ),
-    "Israel": _LeagueConfig(
-        db_filter="m.tournament_name = 'Israel'",
-        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/israel/super-league/results/"],
-    ),
-}
 
 
 @dataclass
@@ -149,9 +98,9 @@ class FlashscoreIdMatcher(BaseCollector):
         dry_run: bool = False,
         limit: int | None = None,
     ) -> None:
-        unknown = [l for l in leagues if l not in _LEAGUES]
+        unknown = [l for l in leagues if l not in LEAGUES]
         if unknown:
-            raise ValueError(f"Unknown leagues: {unknown}. Available: {list(_LEAGUES)}")
+            raise ValueError(f"Unknown leagues: {unknown}. Available: {list(LEAGUES)}")
         self._leagues = leagues
         self._dry_run = dry_run
         self._limit   = limit
@@ -164,7 +113,7 @@ class FlashscoreIdMatcher(BaseCollector):
             browser, page = await make_flashscore_session(pw)
             try:
                 for league in self._leagues:
-                    await self._run_league(page, league, _LEAGUES[league], totals)
+                    await self._run_league(page, league, LEAGUES[league], totals)
             finally:
                 await browser.close()
 
@@ -180,7 +129,7 @@ class FlashscoreIdMatcher(BaseCollector):
         self,
         page: Any,
         league: str,
-        cfg: _LeagueConfig,
+        cfg: LeagueConfig,
         totals: dict[str, int],
     ) -> None:
         db_matches = await _load_db_matches(self._sf, cfg.db_filter, self._limit)
@@ -205,7 +154,7 @@ class FlashscoreIdMatcher(BaseCollector):
             fs_match = find_match(
                 index, target.match_date,
                 target.home_team, target.away_team,
-                threshold=_MATCH_THRESHOLD,
+                threshold=MATCH_THRESHOLD,
             )
             if fs_match is None:
                 unmatched += 1
@@ -246,7 +195,7 @@ class FlashscoreIdMatcher(BaseCollector):
 
 def _parse_args() -> dict[str, Any]:
     args = sys.argv[1:]
-    opts: dict[str, Any] = {"leagues": list(_LEAGUES), "dry_run": False, "limit": None}
+    opts: dict[str, Any] = {"leagues": list(LEAGUES), "dry_run": False, "limit": None}
     i = 0
     while i < len(args):
         if args[i] == "--leagues" and i + 1 < len(args):

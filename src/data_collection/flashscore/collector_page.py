@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from playwright.async_api import Page
 
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
+from src.data_collection.flashscore.collector_parse import abbrev, parse_fs_datetime
 from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow, get_or_create_team, save_quarter_stats, upsert_match
 from src.database.models import MatchStatus, PeriodType, SeasonType
@@ -146,47 +146,7 @@ class FsCollectedMatch:
     q_scores:   list[QScore] = field(default_factory=list)
 
 
-def _abbrev(name: str) -> str:
-    words = name.split()
-    if len(words) >= 2:
-        return "".join(w[0] for w in words[:3]).upper()
-    return name[:3].upper()
-
-
-def _parse_fs_datetime(time_str: str) -> datetime | None:
-    s = time_str.strip()
-    m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{2}):(\d{2}))?", s)
-    if m:
-        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        hour   = int(m.group(4)) if m.group(4) else 12
-        minute = int(m.group(5)) if m.group(5) else 0
-        try:
-            return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    m2 = re.match(r"(\d{1,2})\.(\d{1,2})\.\s*(\d{2}):(\d{2})", s)
-    if m2:
-        day, month = int(m2.group(1)), int(m2.group(2))
-        hour, minute = int(m2.group(3)), int(m2.group(4))
-    else:
-        m3 = re.match(r"(\d{1,2})\.(\d{1,2})\.", s)
-        if not m3:
-            return None
-        day, month = int(m3.group(1)), int(m3.group(2))
-        hour, minute = 12, 0
-    today = date.today()
-    best = None
-    for year in [today.year, today.year - 1]:
-        try:
-            d = date(year, month, day)
-            if d <= today and abs((today - d).days) <= 540:
-                if best is None or d > best:
-                    best = d
-        except ValueError:
-            pass
-    if best is None:
-        return None
-    return datetime(best.year, best.month, best.day, hour, minute, tzinfo=timezone.utc)
+# Date / abbreviation parsing lives in collector_parse.py (pure, unit-tested).
 
 
 async def scrape_results_page(page: Page, path: str) -> list[FsCollectedMatch]:
@@ -220,7 +180,7 @@ async def scrape_results_page(page: Page, path: str) -> list[FsCollectedMatch]:
             continue
         results.append(FsCollectedMatch(
             fs_id=r["fsId"], time_str=r["timeStr"],
-            match_dt=_parse_fs_datetime(r["timeStr"]),
+            match_dt=parse_fs_datetime(r["timeStr"]),
             home_raw=r["home"], away_raw=r["away"],
             final_home=r.get("finalHome"), final_away=r.get("finalAway"),
             has_ot=r.get("hasOT", False),
@@ -244,8 +204,8 @@ async def save_match(
 
     async with session_factory() as db:
         async with db.begin():
-            home_team = await get_or_create_team(db, home_ext, m.home_raw, _abbrev(m.home_raw))
-            away_team = await get_or_create_team(db, away_ext, m.away_raw, _abbrev(m.away_raw))
+            home_team = await get_or_create_team(db, home_ext, m.home_raw, abbrev(m.home_raw))
+            away_team = await get_or_create_team(db, away_ext, m.away_raw, abbrev(m.away_raw))
             match = await upsert_match(
                 db, external_id=external_id,
                 home_team_id=home_team.id, away_team_id=away_team.id,
