@@ -29,6 +29,13 @@ _STOP = re.compile(
 _PUNCT       = re.compile(r"[^a-z0-9 ]")
 _DIGITS_ONLY = re.compile(r"\b\d+\b")
 
+# Containment-boost coefficients for _sim(): when one token set is a subset of
+# the other (e.g. "Milano" ⊂ "EA7 Emporio Armani Milano"), the score is lifted
+# to at least BASE + SLOPE * (subset_size / superset_size). Tuned so a 1-of-4
+# token containment scores 0.5625 — above the 0.45 match threshold.
+_CONTAINMENT_BASE:  float = 0.5
+_CONTAINMENT_SLOPE: float = 0.25
+
 _SPLIT_COMPOUNDS = [
     ("sunrockers", "sun rockers"),
     ("neozone",    "neo zone"),
@@ -77,7 +84,7 @@ def _sim(a: str, b: str) -> float:
     overlap = len(ta & tb) / max(len(ta), len(tb))
     big, small = (ta, tb) if len(ta) >= len(tb) else (tb, ta)
     if small and small.issubset(big):
-        containment = 0.5 + 0.25 * (len(small) / len(big))
+        containment = _CONTAINMENT_BASE + _CONTAINMENT_SLOPE * (len(small) / len(big))
         overlap = max(overlap, containment)
     return overlap
 
