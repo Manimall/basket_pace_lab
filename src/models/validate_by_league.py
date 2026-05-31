@@ -27,6 +27,7 @@ import pandas as pd
 from src.config import settings
 from src.features.score_features import ALL_FEAT, TARGET, build_features, load_data
 from src.models.evaluation import (
+    LeagueResult,
     chrono_split,
     compute_metrics,
     get_xy,
@@ -37,8 +38,13 @@ from src.models.evaluation import (
 logging.basicConfig(level=settings.app.log_level, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+# Feature-importance bar chart scaling.
+_FEAT_IMP_TOP_N: int = 15
+_FEAT_IMP_BAR_WIDTH: int = 25
+
 
 def main() -> None:
+    """Run per-league cross-validation and log the results + importance table."""
     log.info("Loading data from DB…")
     matches, qs = asyncio.run(load_data())
     log.info("  Matches: %d  |  QuarterStats rows: %d", len(matches), len(qs))
@@ -55,7 +61,7 @@ def main() -> None:
     log.info("Training CatBoost…")
     model = train(train_df)
 
-    result_rows: list[dict] = []
+    result_rows: list[LeagueResult] = []
     for league, test_df in sorted(test_dict.items()):
         test_df = test_df.dropna(subset=[TARGET])
         if len(test_df) < settings.model.min_test_rows:
@@ -69,26 +75,27 @@ def main() -> None:
         baseline_mae, _ = compute_metrics(y_te.values, np.full(len(y_te), baseline_mean))
 
         avg_q1 = test_df["q1_total"].mean()
-        result_rows.append({
-            "league":       league,
-            "n":            len(test_df),
-            "mae":          mae,
-            "rmse":         rmse,
-            "baseline_mae": baseline_mae,
-            "avg_q1":       avg_q1 if pd.notna(avg_q1) else 0.0,
-        })
+        result_rows.append(LeagueResult(
+            league       = str(league),
+            n            = len(test_df),
+            mae          = mae,
+            rmse         = rmse,
+            baseline_mae = baseline_mae,
+            avg_q1       = float(avg_q1) if pd.notna(avg_q1) else 0.0,
+        ))
 
     print_results_table(result_rows)
 
     feat_imp = pd.DataFrame({
         "feature":    feat_cols,
         "importance": model.get_feature_importance(),
-    }).sort_values("importance", ascending=False).head(15)
-    print("Top-15 Feature Importances:")
+    }).sort_values("importance", ascending=False).head(_FEAT_IMP_TOP_N)
+    max_imp = feat_imp["importance"].max()
+    lines: list[str] = [f"Top-{_FEAT_IMP_TOP_N} Feature Importances:"]
     for _, row in feat_imp.iterrows():
-        bar = "█" * int(row["importance"] / feat_imp["importance"].max() * 25)
-        print(f"  {row['feature']:<45s} {row['importance']:5.1f}%  {bar}")
-    print()
+        bar = "█" * int(row["importance"] / max_imp * _FEAT_IMP_BAR_WIDTH)
+        lines.append(f"  {row['feature']:<45s} {row['importance']:5.1f}%  {bar}")
+    log.info("\n%s\n", "\n".join(lines))
 
 
 if __name__ == "__main__":

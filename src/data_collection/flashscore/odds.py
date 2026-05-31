@@ -29,6 +29,7 @@ from playwright.async_api import Page
 
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
+from src.data_collection.flashscore.odds_parse import extract_total_line
 
 log = logging.getLogger(__name__)
 
@@ -53,53 +54,7 @@ class OddsRow:
     scraped_at:  datetime
 
 
-# -----------------------------------------------------------------------
-# Parsing
-# -----------------------------------------------------------------------
-
-def _parse_best_opportunity(opportunities: list[dict]) -> tuple[float | None, float]:
-    """
-    From a list of Over/Under opportunities (different lines per bookmaker),
-    pick the handicap whose payout odds are most symmetric.
-    Returns (handicap, asymmetry_score).
-    """
-    best_handicap: float | None = None
-    best_score:    float        = float("inf")
-    for opp in opportunities:
-        try:
-            over_v   = float(opp["over"]["value"])
-            under_v  = float(opp["under"]["value"])
-            handicap = float(opp["handicap"]["value"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        score = abs(over_v - under_v) / (over_v + under_v)
-        if score < best_score:
-            best_score    = score
-            best_handicap = handicap
-    return best_handicap, best_score
-
-
-def _extract_total_line(ou_responses: list[dict]) -> tuple[float | None, str]:
-    """
-    From captured OVER_UNDER API responses, select the bookmaker whose best
-    opportunity has the most symmetric odds (= sharpest/most reliable line).
-    Returns (total_close, bookmaker_id_str).
-    """
-    candidates: list[tuple[float, float, str]] = []  # (asymmetry, handicap, bm_id)
-    for resp in ou_responses:
-        bm_data = (resp.get("data") or {}).get("findPrematchOddsForBookmaker")
-        if not bm_data:
-            continue
-        bm_id    = str(bm_data.get("bookmakerId", ""))
-        opps     = bm_data.get("opportunities") or []
-        handicap, score = _parse_best_opportunity(opps)
-        if handicap is not None:
-            candidates.append((score, handicap, bm_id))
-    if not candidates:
-        return None, ""
-    candidates.sort()                      # smallest asymmetry first
-    _, handicap, bm_id = candidates[0]
-    return handicap, bm_id
+# Total-line parsing lives in odds_parse.py (pure, unit-tested).
 
 
 # -----------------------------------------------------------------------
@@ -254,7 +209,7 @@ async def scrape_match_odds(
         log.debug("  [%s] No O/U API responses captured", flashscore_id)
         return None
 
-    total_close, bm_id = _extract_total_line(ou_responses)
+    total_close, bm_id = extract_total_line(ou_responses)
     if total_close is None:
         log.debug(
             "  [%s] Could not parse total line from %d responses",

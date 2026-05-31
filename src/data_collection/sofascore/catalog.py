@@ -6,7 +6,36 @@ Season codes ("2526", "2425", "2324") are used for CLI --seasons filtering.
 """
 from __future__ import annotations
 
-LEAGUE_CATALOG: dict[str, dict] = {
+from typing import TypedDict
+
+
+class SeasonEntry(TypedDict):
+    """One Sofascore season within a tournament.
+
+    Attributes:
+        id: Sofascore season id (used in the events API path).
+        name: Human-readable season label.
+        code: Short season code ("2526" …) used for ``--seasons`` filtering.
+    """
+
+    id:   int
+    name: str
+    code: str
+
+
+class LeagueEntry(TypedDict):
+    """One league's Sofascore tournament id and its seasons.
+
+    Attributes:
+        tournament_id: Sofascore unique-tournament id.
+        seasons: Ordered list of seasons (newest first by convention).
+    """
+
+    tournament_id: int
+    seasons:       list[SeasonEntry]
+
+
+LEAGUE_CATALOG: dict[str, LeagueEntry] = {
     "NBA": {
         "tournament_id": 132,
         "seasons": [

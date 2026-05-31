@@ -9,12 +9,12 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import random
 import sys
 import time
-from typing import Any
 
 from playwright.async_api import async_playwright
 from sqlalchemy import text
@@ -28,7 +28,7 @@ from src.data_collection.sofascore.event import (
     load_existing_external_ids,
     process_event,
 )
-from src.database.engine import create_tables, dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, create_tables, dispose_engine, get_session_factory
 
 log = logging.getLogger("mass_scheduler")
 
@@ -36,7 +36,7 @@ log = logging.getLogger("mass_scheduler")
 class MassScheduler(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         max_pages: int = 50,
         league_filter: list[str] | None = None,
         season_filter: list[str] | None = None,
@@ -62,6 +62,7 @@ class MassScheduler(BaseCollector):
         return queue
 
     async def run(self) -> None:
+        """Collect every queued league-season, persisting matches + quarter stats."""
         queue = self._build_queue()
         cfg   = settings.collector
 
@@ -160,29 +161,23 @@ class MassScheduler(BaseCollector):
         await dispose_engine()
 
 
-def _parse_args() -> dict:
-    args = sys.argv[1:]
-    opts: dict = {"leagues": None, "seasons": None, "dry_run": False}
-    i = 0
-    while i < len(args):
-        if args[i] == "--leagues" and i + 1 < len(args):
-            vals, i = [], i + 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["leagues"] = vals
-        elif args[i] == "--seasons" and i + 1 < len(args):
-            vals, i = [], i + 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["seasons"] = vals
-        elif args[i] == "--dry-run":
-            opts["dry_run"] = True; i += 1
-        else:
-            i += 1
-    return opts
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI options for the multi-league Sofascore collector.
+
+    Returns:
+        Namespace with ``leagues`` (list[str] | None), ``seasons``
+        (list[str] | None), and ``dry_run`` (bool).
+    """
+    p = argparse.ArgumentParser(description="Sofascore multi-league bulk collector.")
+    p.add_argument("--leagues", nargs="+", default=None, help="League keys to collect.")
+    p.add_argument("--seasons", nargs="+", default=None, help="Season codes to restrict to.")
+    p.add_argument("--dry-run", action="store_true", help="Print the queue, do not scrape.")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", stream=sys.stdout)
-    opts = _parse_args()
-    MassScheduler(league_filter=opts["leagues"], season_filter=opts["seasons"], dry_run=opts["dry_run"]).run_sync()
+    args = _parse_args()
+    MassScheduler(
+        league_filter=args.leagues, season_filter=args.seasons, dry_run=args.dry_run,
+    ).run_sync()

@@ -74,6 +74,14 @@ def _calc_pace(possessions: float | None, period_type: PeriodType) -> float | No
 
 
 def safe_int(v: Any) -> int | None:
+    """Coerce a value to int, returning None on any failure.
+
+    Args:
+        v: Value to convert.
+
+    Returns:
+        The int value, or None if conversion raised.
+    """
     try:
         return int(v)
     except Exception:
@@ -153,6 +161,17 @@ def parse_period(
     home_score: int | None,
     away_score: int | None,
 ) -> QuarterStatRow | None:
+    """Parse one period's statistics block into a QuarterStatRow.
+
+    Args:
+        label: Period label (e.g. "1ST", "ALL").
+        period_data: Raw Sofascore statistics for the period.
+        home_score: Home points for the period (may be None).
+        away_score: Away points for the period (may be None).
+
+    Returns:
+        A populated ``QuarterStatRow``, or None for unmapped labels.
+    """
     mapping = PERIOD_MAP.get(label.upper())
     if not mapping:
         return None

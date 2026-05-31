@@ -62,6 +62,17 @@ class _SofaApiPage:
         self._call_count = 0
 
     async def get(self, path: str) -> dict[str, Any]:
+        """GET a ChinaNBL API path and return parsed JSON.
+
+        Args:
+            path: API path appended to the base URL.
+
+        Returns:
+            Parsed JSON body.
+
+        Raises:
+            RuntimeError: If the response is missing or non-200.
+        """
         url = BASE_URL + path
         resp = await self._page.goto(url, wait_until="domcontentloaded", timeout=20_000)
         if not resp or resp.status != 200:
@@ -74,6 +85,14 @@ class _SofaApiPage:
         return json.loads(body)
 
     async def fetch_all_events(self, season_id: int) -> list[dict[str, Any]]:
+        """Page through all events for a season.
+
+        Args:
+            season_id: ChinaNBL season id.
+
+        Returns:
+            Concatenated event dicts across all pages.
+        """
         events: list[dict[str, Any]] = []
         for page_num in range(MAX_PAGES):
             data = await self.get(
@@ -87,6 +106,14 @@ class _SofaApiPage:
         return events
 
     async def fetch_stats(self, event_id: int) -> dict[str, Any] | None:
+        """Fetch an event's statistics, returning None on failure.
+
+        Args:
+            event_id: ChinaNBL event id.
+
+        Returns:
+            Statistics JSON, or None if the request failed.
+        """
         try:
             return await self.get(f"/event/{event_id}/statistics")
         except Exception as e:
@@ -95,6 +122,14 @@ class _SofaApiPage:
 
 
 def extract_quarter_rows(event: dict[str, Any]) -> list[QuarterStatRow]:
+    """Extract regulation-quarter score rows from an event payload.
+
+    Args:
+        event: Event dict with ``homeScore`` / ``awayScore`` period fields.
+
+    Returns:
+        Quarter stat rows for periods that have at least one score.
+    """
     hs, as_ = event.get("homeScore", {}), event.get("awayScore", {})
     rows = []
     for q in range(1, 5):
@@ -108,6 +143,14 @@ def extract_quarter_rows(event: dict[str, Any]) -> list[QuarterStatRow]:
 
 
 def extract_ot_rows(event: dict[str, Any]) -> list[QuarterStatRow]:
+    """Extract overtime score rows from an event payload.
+
+    Args:
+        event: Event dict with ``homeScore`` / ``awayScore`` period fields.
+
+    Returns:
+        Overtime stat rows (renumbered from 1), stopping at the first empty OT.
+    """
     hs, as_ = event.get("homeScore", {}), event.get("awayScore", {})
     rows = []
     ot_num = 1

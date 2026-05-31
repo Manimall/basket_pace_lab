@@ -14,11 +14,13 @@ class DatabaseSettings(BaseSettings):
     @computed_field
     @property
     def async_dsn(self) -> str:
+        """Return the asyncpg SQLAlchemy DSN for this database config."""
         return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
     @computed_field
     @property
     def sync_dsn(self) -> str:
+        """Return the psycopg2 SQLAlchemy DSN for this database config."""
         return f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
 

@@ -37,6 +37,9 @@ DEFAULT_TOP_N:          int          = 15
 DEFAULT_DEAD_THRESHOLD: float        = 0.5
 LEAGUES_UNDER_AUDIT:    tuple[str, ...] = ("NBA", "EuroLeague", "ABA")
 
+# Bar-chart width (characters) for the importance visualisation.
+_BAR_WIDTH: int = 25
+
 
 @dataclass(frozen=True)
 class LeagueImportance:
@@ -124,32 +127,32 @@ def find_dead_weight(
     return sorted(merged[dead_msk].index.tolist())
 
 
-def print_top_n_table(report: LeagueImportance, top_n: int) -> None:
-    """Render the top-N features for one league as a bar chart on stdout."""
+def render_top_n_table(report: LeagueImportance, top_n: int) -> str:
+    """Render the top-N features for one league as a multi-line bar chart."""
     fi      = report.importance.head(top_n)
     max_imp = float(fi["importance"].max() or 1.0)
     feat_n  = len(report.importance)
-    print(
-        f"\n=== {report.league_key} "
-        f"(train n={report.n_train}, {feat_n} features) — TOP {top_n} ===",
-    )
+    lines = [
+        f"=== {report.league_key} "
+        f"(train n={report.n_train}, {feat_n} features) — TOP {top_n} ==="
+    ]
     for _, row in fi.iterrows():
-        bar = "█" * int(row["importance"] / max_imp * 25)
-        print(f"  {row['feature']:<42s} {row['importance']:6.2f}%  {bar}")
+        bar = "█" * int(row["importance"] / max_imp * _BAR_WIDTH)
+        lines.append(f"  {row['feature']:<42s} {row['importance']:6.2f}%  {bar}")
+    return "\n".join(lines)
 
 
-def print_dead_weight(features: list[str], threshold: float) -> None:
-    """Render the dead-weight candidate list."""
-    print(
-        f"\n=== DEAD WEIGHT "
-        f"(importance < {threshold:.2f}% in ALL audited leagues) ===",
-    )
+def render_dead_weight(features: list[str], threshold: float) -> str:
+    """Render the dead-weight candidate list as a multi-line string."""
+    lines = [
+        f"=== DEAD WEIGHT (importance < {threshold:.2f}% in ALL audited leagues) ==="
+    ]
     if not features:
-        print("  (none found)")
-        return
-    print(f"  Found {len(features)} candidate(s) for pruning:")
-    for f in features:
-        print(f"    - {f}")
+        lines.append("  (none found)")
+        return "\n".join(lines)
+    lines.append(f"  Found {len(features)} candidate(s) for pruning:")
+    lines.extend(f"    - {f}" for f in features)
+    return "\n".join(lines)
 
 
 def _parse_cli() -> argparse.Namespace:
@@ -181,11 +184,11 @@ def main() -> None:
         report = compute_league_importance(df, league)
         if report is not None:
             reports.append(report)
-            print_top_n_table(report, args.top_n)
+            log.info("\n%s", render_top_n_table(report, args.top_n))
 
     if reports:
         dead = find_dead_weight(reports, args.dead_threshold)
-        print_dead_weight(dead, args.dead_threshold)
+        log.info("\n%s", render_dead_weight(dead, args.dead_threshold))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import sys
@@ -24,68 +25,17 @@ from playwright.async_api import async_playwright
 from sqlalchemy import text
 
 from src.data_collection.base import BaseCollector
-from src.data_collection.constants import FLASHSCORE_BASE_URL
 from src.data_collection.flashscore.browser import make_flashscore_session
+from src.data_collection.flashscore.id_matcher_config import (
+    MATCH_THRESHOLD,
+    LeagueConfig,
+    LEAGUES,
+)
 from src.data_collection.flashscore.norm import FsMatch, _norm, _sim
 from src.data_collection.flashscore.page import build_index_from_url, find_match
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
-
-_MATCH_THRESHOLD = 0.45
-
-
-@dataclass(frozen=True)
-class _LeagueConfig:
-    db_filter: str      # WHERE fragment; alias 'm' refers to the matches table
-    fs_urls: list[str]  # full Flashscore results-page URLs (multiple = merged index)
-
-
-_LEAGUES: dict[str, _LeagueConfig] = {
-    "NBA": _LeagueConfig(
-        db_filter="m.tournament_name IS NULL",
-        fs_urls=[
-            # Current season (2025-26)
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba/results/",
-            # Previous season — most unmatched records are from 2024-25
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba-2024-2025/results/",
-            # NBA Cup (In-Season Tournament) is on its own page
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba-cup/results/",
-            # Playoffs — separate page
-            FLASHSCORE_BASE_URL + "/basketball/usa/nba-playoffs/results/",
-        ],
-    ),
-    "BLeague": _LeagueConfig(
-        db_filter="m.tournament_name = 'BLeague'",
-        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/japan/b-league/results/"],
-    ),
-    "ChinaNBL": _LeagueConfig(
-        db_filter="m.tournament_name = 'ChinaNBL'",
-        # NOTE: Flashscore may not cover this league; URL is best-effort
-        fs_urls=[
-            FLASHSCORE_BASE_URL + "/basketball/china/nbl/results/",
-            FLASHSCORE_BASE_URL + "/basketball/china/nbl-2/results/",
-        ],
-    ),
-    "LNBP": _LeagueConfig(
-        db_filter="m.tournament_name = 'LNBP'",
-        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/mexico/lnbp/results/"],
-    ),
-    "ABA": _LeagueConfig(
-        db_filter="m.tournament_name = 'ABA'",
-        fs_urls=[
-            # Current season (2025/26) — sponsor naming "AdmiralBet ABA League"
-            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league/results/",
-            # Previous seasons — kept for historical matching when archive data is ingested
-            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2024-2025/results/",
-            FLASHSCORE_BASE_URL + "/basketball/europe/admiralbet-aba-league-2023-2024/results/",
-        ],
-    ),
-    "Israel": _LeagueConfig(
-        db_filter="m.tournament_name = 'Israel'",
-        fs_urls=[FLASHSCORE_BASE_URL + "/basketball/israel/super-league/results/"],
-    ),
-}
 
 
 @dataclass
@@ -103,7 +53,7 @@ def _score(target: _DbMatch, entry: FsMatch) -> float:
 
 
 async def _load_db_matches(
-    sf: Any, db_filter: str, limit: int | None,
+    sf: SessionFactory, db_filter: str, limit: int | None,
 ) -> list[_DbMatch]:
     lim = f"LIMIT {int(limit)}" if limit else ""
     sql = f"""
@@ -133,7 +83,7 @@ async def _load_db_matches(
     ]
 
 
-async def _save_flashscore_id(sf: Any, match_id: int, fs_id: str) -> None:
+async def _save_flashscore_id(sf: SessionFactory, match_id: int, fs_id: str) -> None:
     async with sf() as db:
         async with db.begin():
             await db.execute(
@@ -149,22 +99,23 @@ class FlashscoreIdMatcher(BaseCollector):
         dry_run: bool = False,
         limit: int | None = None,
     ) -> None:
-        unknown = [l for l in leagues if l not in _LEAGUES]
+        unknown = [l for l in leagues if l not in LEAGUES]
         if unknown:
-            raise ValueError(f"Unknown leagues: {unknown}. Available: {list(_LEAGUES)}")
+            raise ValueError(f"Unknown leagues: {unknown}. Available: {list(LEAGUES)}")
         self._leagues = leagues
         self._dry_run = dry_run
         self._limit   = limit
         self._sf      = get_session_factory()
 
     async def run(self) -> None:
+        """Match every configured league's DB matches to Flashscore ids."""
         totals = {"matched": 0, "unmatched": 0}
 
         async with async_playwright() as pw:
             browser, page = await make_flashscore_session(pw)
             try:
                 for league in self._leagues:
-                    await self._run_league(page, league, _LEAGUES[league], totals)
+                    await self._run_league(page, league, LEAGUES[league], totals)
             finally:
                 await browser.close()
 
@@ -180,7 +131,7 @@ class FlashscoreIdMatcher(BaseCollector):
         self,
         page: Any,
         league: str,
-        cfg: _LeagueConfig,
+        cfg: LeagueConfig,
         totals: dict[str, int],
     ) -> None:
         db_matches = await _load_db_matches(self._sf, cfg.db_filter, self._limit)
@@ -205,7 +156,7 @@ class FlashscoreIdMatcher(BaseCollector):
             fs_match = find_match(
                 index, target.match_date,
                 target.home_team, target.away_team,
-                threshold=_MATCH_THRESHOLD,
+                threshold=MATCH_THRESHOLD,
             )
             if fs_match is None:
                 unmatched += 1
@@ -244,24 +195,18 @@ class FlashscoreIdMatcher(BaseCollector):
                 )
 
 
-def _parse_args() -> dict[str, Any]:
-    args = sys.argv[1:]
-    opts: dict[str, Any] = {"leagues": list(_LEAGUES), "dry_run": False, "limit": None}
-    i = 0
-    while i < len(args):
-        if args[i] == "--leagues" and i + 1 < len(args):
-            vals: list[str] = []
-            i += 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["leagues"] = vals
-        elif args[i] == "--dry-run":
-            opts["dry_run"] = True; i += 1
-        elif args[i] == "--limit" and i + 1 < len(args):
-            opts["limit"] = int(args[i + 1]); i += 2
-        else:
-            i += 1
-    return opts
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI options for the Flashscore ID matcher.
+
+    Returns:
+        Namespace with ``leagues`` (defaults to all configured leagues),
+        ``dry_run`` (bool), and ``limit`` (int | None).
+    """
+    p = argparse.ArgumentParser(description="Assign flashscore_id to DB matches via fuzzy match.")
+    p.add_argument("--leagues", nargs="+", default=list(LEAGUES), help="League keys to process.")
+    p.add_argument("--dry-run", action="store_true", help="Match but do not write.")
+    p.add_argument("--limit", type=int, default=None, help="Max matches per league.")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
@@ -270,9 +215,9 @@ if __name__ == "__main__":
         format="%(asctime)s | %(levelname)-8s | %(message)s",
         stream=sys.stdout,
     )
-    opts = _parse_args()
+    args = _parse_args()
     FlashscoreIdMatcher(
-        leagues=opts["leagues"],
-        dry_run=opts["dry_run"],
-        limit=opts["limit"],
+        leagues=args.leagues,
+        dry_run=args.dry_run,
+        limit=args.limit,
     ).run_sync()

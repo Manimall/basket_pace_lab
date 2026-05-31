@@ -13,6 +13,7 @@ from playwright.async_api import Page
 from sqlalchemy import text
 
 from src.database import crud
+from src.database.engine import SessionFactory
 from src.database.crud import QuarterStatRow
 from src.database.models import MatchStatus, SeasonType
 from src.data_collection.constants import SOFASCORE_API_HEADERS
@@ -34,6 +35,15 @@ _STATUS_MAP = {
 
 
 async def api_get(page: Page, path: str) -> dict[str, Any] | None:
+    """GET a Sofascore API path via the Playwright page request.
+
+    Args:
+        page: Active Playwright page (carries the warmed-up session).
+        path: API path appended to the Sofascore v1 base URL.
+
+    Returns:
+        Parsed JSON dict, or None on non-OK status / network error.
+    """
     url = f"https://www.sofascore.com/api/v1{path}"
     try:
         resp = await page.request.get(url, headers=SOFASCORE_API_HEADERS, timeout=15_000)
@@ -47,6 +57,17 @@ async def api_get(page: Page, path: str) -> dict[str, Any] | None:
 async def fetch_event_ids(
     page: Page, tournament_id: int, season_id: int, max_pages: int = 50
 ) -> list[int]:
+    """Page through a season's event list and collect finished event ids.
+
+    Args:
+        page: Active Playwright page.
+        tournament_id: Sofascore unique-tournament id.
+        season_id: Sofascore season id.
+        max_pages: Hard cap on pages to request.
+
+    Returns:
+        List of finished-event ids (possibly empty).
+    """
     ids: list[int] = []
     for p in range(max_pages):
         data = await api_get(
@@ -62,7 +83,7 @@ async def fetch_event_ids(
     return ids
 
 
-async def load_existing_external_ids(session_factory: Any) -> set[str]:
+async def load_existing_external_ids(session_factory: SessionFactory) -> set[str]:
     """Return external_ids of matches that already have quarter_stats."""
     async with session_factory() as db:
         rows = await db.execute(text("""
@@ -79,7 +100,7 @@ async def process_event(
     event_id: int,
     tournament_id: int,
     tournament_name: str,
-    session_factory: Any,
+    session_factory: SessionFactory,
     existing_ids: set[str],
 ) -> str:
     """Fetch, parse, and persist one event. Returns 'ok'|'skip'|'exists'|'error'."""

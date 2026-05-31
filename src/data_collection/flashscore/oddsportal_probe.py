@@ -25,6 +25,7 @@ _RESULTS_URL = _BASE + "/basketball/russia/vtb-united-league/results/"
 
 
 async def run() -> None:
+    """Probe OddsPortal pages to research their odds-rendering structure."""
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         ua      = random.choice(USER_AGENTS)

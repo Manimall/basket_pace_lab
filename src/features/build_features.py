@@ -24,6 +24,7 @@ from typing import Sequence
 
 import pandas as pd
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import settings
 from src.data_collection.sofascore_client import FTA_TO_POSS_FACTOR  # noqa: F401 — re-exported for notebooks
@@ -95,7 +96,10 @@ class BasketballFeatureBuilder:
         df = await builder.generate_training_dataset()  # async
     """
 
-    def __init__(self, session_factory=None) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ) -> None:
         self._sf = session_factory or get_session_factory()
 
     # ── 1. Data loading ───────────────────────────────────────────────

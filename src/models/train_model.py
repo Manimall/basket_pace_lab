@@ -11,7 +11,8 @@ Run:
 """
 from __future__ import annotations
 
-import sys
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,21 @@ from sklearn.model_selection import train_test_split
 
 from src.features.build_features import BasketballFeatureBuilder
 
+log = logging.getLogger(__name__)
+
 TARGET = "q1_avg_pace"
+
+# ── Q1-pace MVP hyperparameters (distinct from the totals model in settings) ──
+_CB_ITERATIONS:    int   = 1000
+_CB_LEARNING_RATE: float = 0.05
+_CB_DEPTH:         int   = 6
+_CB_RANDOM_SEED:   int   = 42
+_CB_VERBOSE_EVERY: int   = 100
+_EARLY_STOP_ROUNDS: int  = 50
+_TEST_SIZE:        float = 0.20
+_FEAT_IMP_TOP_N:   int   = 10
+_FEAT_IMP_BAR_WIDTH: int = 20
+_MODEL_FILENAME:   str   = "q1_pace_v1.cbm"
 
 # All target columns that must be excluded from X to prevent data leakage
 _ALL_TARGETS = [
@@ -54,11 +69,27 @@ _DROP_COLS = [
 
 
 def load_dataset() -> pd.DataFrame:
+    """Build and return the full feature dataset from the database.
+
+    Returns:
+        The feature-built match DataFrame produced by ``BasketballFeatureBuilder``.
+    """
     builder = BasketballFeatureBuilder()
     return builder.build()
 
 
 def prepare_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[str]]:
+    """Build the leakage-free feature matrix and target for the Q1-pace model.
+
+    Sorts chronologically, drops first-game rows lacking rolling history, and
+    removes all target/raw columns from X.
+
+    Args:
+        df: Feature-built dataset from ``load_dataset``.
+
+    Returns:
+        Tuple ``(X, y, feature_names)``.
+    """
     # Strict chronological order
     df = df.sort_values("scheduled_at").reset_index(drop=True)
 
@@ -74,39 +105,79 @@ def prepare_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[str]]:
     return X, y, list(X.columns)
 
 
+@dataclass(frozen=True)
+class EvalMetrics:
+    """Regression metrics for one held-out evaluation."""
+
+    mae:   float
+    rmse:  float
+    preds: np.ndarray
+
+
 def train(X_tr: pd.DataFrame, y_tr: pd.Series,
           X_te: pd.DataFrame, y_te: pd.Series) -> CatBoostRegressor:
+    """Train the Q1-pace CatBoost regressor with early stopping.
+
+    Args:
+        X_tr: Training feature matrix.
+        y_tr: Training target (q1_avg_pace).
+        X_te: Eval feature matrix (for early stopping).
+        y_te: Eval target.
+
+    Returns:
+        The fitted ``CatBoostRegressor``.
+    """
     train_pool = Pool(X_tr, y_tr)
     eval_pool  = Pool(X_te, y_te)
 
     model = CatBoostRegressor(
-        iterations=1000,
-        learning_rate=0.05,
-        depth=6,
+        iterations=_CB_ITERATIONS,
+        learning_rate=_CB_LEARNING_RATE,
+        depth=_CB_DEPTH,
         loss_function="MAE",
         eval_metric="MAE",
-        random_seed=42,
-        verbose=100,
+        random_seed=_CB_RANDOM_SEED,
+        verbose=_CB_VERBOSE_EVERY,
     )
     model.fit(
         train_pool,
         eval_set=eval_pool,
-        early_stopping_rounds=50,
+        early_stopping_rounds=_EARLY_STOP_ROUNDS,
     )
     return model
 
 
 def evaluate(model: CatBoostRegressor,
-             X_te: pd.DataFrame, y_te: pd.Series) -> dict[str, float]:
+             X_te: pd.DataFrame, y_te: pd.Series) -> EvalMetrics:
+    """Score a trained model on the held-out set.
+
+    Args:
+        model: Fitted regressor.
+        X_te: Test feature matrix.
+        y_te: Test target.
+
+    Returns:
+        ``EvalMetrics`` with MAE, RMSE, and raw predictions.
+    """
     preds = model.predict(X_te)
-    mae  = mean_absolute_error(y_te, preds)
-    rmse = mean_squared_error(y_te, preds) ** 0.5
-    return {"MAE": mae, "RMSE": rmse, "preds": preds}
+    mae  = float(mean_absolute_error(y_te, preds))
+    rmse = float(np.sqrt(mean_squared_error(y_te, preds)))
+    return EvalMetrics(mae=mae, rmse=rmse, preds=preds)
 
 
 def feature_importance(model: CatBoostRegressor,
                        feature_names: list[str],
-                       top_n: int = 10) -> pd.DataFrame:
+                       top_n: int = _FEAT_IMP_TOP_N) -> pd.DataFrame:
+    """Return the top-N features ranked by CatBoost importance.
+
+    Args:
+        model: Fitted regressor.
+        feature_names: Column names aligned with the model's feature order.
+        top_n: Number of rows to keep.
+
+    Returns:
+        DataFrame of ``(feature, importance)`` sorted descending.
+    """
     imp = model.get_feature_importance()
     return (
         pd.DataFrame({"feature": feature_names, "importance": imp})
@@ -117,47 +188,60 @@ def feature_importance(model: CatBoostRegressor,
 
 
 def save_model(model: CatBoostRegressor) -> Path:
-    out = Path(__file__).parent / "q1_pace_v1.cbm"
+    """Persist the model to the package's .cbm file.
+
+    Args:
+        model: Fitted regressor to serialise.
+
+    Returns:
+        Path the model was written to.
+    """
+    out = Path(__file__).parent / _MODEL_FILENAME
     model.save_model(str(out))
     return out
 
 
+def _render_feature_importance(fi: pd.DataFrame) -> str:
+    """Render a top-N feature-importance bar chart as a multi-line string."""
+    max_imp = fi["importance"].max()
+    lines = [f"TOP-{_FEAT_IMP_TOP_N} Feature Importance:"]
+    for i, row in fi.iterrows():
+        bar = "█" * int(row["importance"] / max_imp * _FEAT_IMP_BAR_WIDTH)
+        lines.append(f"  {i + 1:>2}. {row['feature']:<35} {row['importance']:6.2f}%  {bar}")
+    return "\n".join(lines)
+
+
 def main() -> None:
-    print("Loading dataset…")
+    """Train, evaluate, log feature importance, and save the Q1-pace model."""
+    log.info("Loading dataset…")
     df = load_dataset()
-    print(f"  Raw rows: {len(df)}")
+    log.info("  Raw rows: %d", len(df))
 
     X, y, feat_names = prepare_xy(df)
-    print(f"  After dropna: {len(X)} rows  |  {len(feat_names)} features")
+    log.info("  After dropna: %d rows | %d features", len(X), len(feat_names))
 
     # Chronological split — NO shuffle
     X_tr, X_te, y_tr, y_te = train_test_split(
-        X, y, test_size=0.2, shuffle=False
+        X, y, test_size=_TEST_SIZE, shuffle=False
     )
-    print(f"  Train: {len(X_tr)}  |  Test: {len(X_te)}")
-    print()
+    log.info("  Train: %d | Test: %d", len(X_tr), len(X_te))
 
-    print("Training CatBoostRegressor…")
+    log.info("Training CatBoostRegressor…")
     model = train(X_tr, y_tr, X_te, y_te)
 
-    print()
-    print("─" * 45)
     metrics = evaluate(model, X_te, y_te)
-    print(f"  MAE  : {metrics['MAE']:.4f}")
-    print(f"  RMSE : {metrics['RMSE']:.4f}")
-    print("─" * 45)
+    log.info("  MAE: %.4f | RMSE: %.4f", metrics.mae, metrics.rmse)
 
-    print()
-    print("TOP-10 Feature Importance:")
     fi = feature_importance(model, feat_names)
-    for i, row in fi.iterrows():
-        bar = "█" * int(row["importance"] / fi["importance"].max() * 20)
-        print(f"  {i+1:>2}. {row['feature']:<35} {row['importance']:6.2f}%  {bar}")
+    log.info("\n%s", _render_feature_importance(fi))
 
     path = save_model(model)
-    print()
-    print(f"Model saved → {path}")
+    log.info("Model saved → %s", path)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)-8s | %(message)s",
+    )
     main()

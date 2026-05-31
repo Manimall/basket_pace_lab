@@ -16,9 +16,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import argparse
 import sys
 import time
-from typing import Any
 
 from playwright.async_api import async_playwright
 
@@ -28,7 +28,7 @@ from src.data_collection.constants import FLASHSCORE_BASE_URL, USER_AGENTS
 from src.data_collection.flashscore.collector_page import (
     COLLECTOR_LEAGUES, FsCollectedMatch, save_match, scrape_results_page,
 )
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger("flashscore_collector")
 
@@ -36,7 +36,7 @@ log = logging.getLogger("flashscore_collector")
 class FlashscoreCollector(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         leagues: list[str] | None = None,
         dry_run: bool = False,
     ) -> None:
@@ -45,6 +45,7 @@ class FlashscoreCollector(BaseCollector):
         self._dry_run = dry_run
 
     async def run(self) -> None:
+        """Scrape configured leagues' results pages and upsert finished matches."""
         log.info("DB: %s:%s/%s", settings.db.host, settings.db.port, settings.db.name)
 
         targets = {
@@ -116,24 +117,19 @@ class FlashscoreCollector(BaseCollector):
         await dispose_engine()
 
 
-def _parse_args() -> dict:
-    args = sys.argv[1:]
-    opts: dict = {"leagues": None, "dry_run": False}
-    i = 0
-    while i < len(args):
-        if args[i] == "--leagues" and i + 1 < len(args):
-            vals, i = [], i + 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["leagues"] = vals
-        elif args[i] == "--dry-run":
-            opts["dry_run"] = True; i += 1
-        else:
-            i += 1
-    return opts
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI options for the Flashscore collector.
+
+    Returns:
+        Namespace with ``leagues`` (list[str] | None) and ``dry_run`` (bool).
+    """
+    p = argparse.ArgumentParser(description="Flashscore multi-league results collector.")
+    p.add_argument("--leagues", nargs="+", default=None, help="League keys to collect.")
+    p.add_argument("--dry-run", action="store_true", help="List targets, do not write.")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", stream=sys.stdout)
-    opts = _parse_args()
-    FlashscoreCollector(leagues=opts["leagues"], dry_run=opts["dry_run"]).run_sync()
+    args = _parse_args()
+    FlashscoreCollector(leagues=args.leagues, dry_run=args.dry_run).run_sync()

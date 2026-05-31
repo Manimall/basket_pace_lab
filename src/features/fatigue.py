@@ -27,6 +27,12 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src.config import settings
+from src.features.fatigue_windows import (
+    b2b_flag,
+    build_team_appearances,
+    consecutive_road_streak,
+    trailing_game_count,
+)
 
 log = logging.getLogger(__name__)
 
@@ -43,9 +49,6 @@ FATIGUE_FEATURE_COLS: list[str] = [
     "away_consecutive_road",
     "rest_diff",
 ]
-
-# Sentinel for "no previous game" — anything above off_season_max_days resets state.
-_NO_PREV_GAME_DAYS: int = 10**6
 
 
 @dataclass(frozen=True)
@@ -82,117 +85,6 @@ def _config_from_settings() -> FatigueWindowConfig:
         high_density_threshold = cfg.fatigue_high_density_threshold,
         off_season_max_days    = cfg.days_rest_clip_max,
     )
-
-
-def build_team_appearances(matches: pd.DataFrame) -> pd.DataFrame:
-    """Stack home + away rows into one team-appearance timeline.
-
-    Args:
-        matches: Match-level DataFrame; must contain ``match_id``,
-            ``scheduled_at``, ``home_team_id``, ``away_team_id``.
-
-    Returns:
-        DataFrame with columns ``match_id``, ``team_id``, ``scheduled_at``,
-        ``is_road``. Sorted by ``(team_id, scheduled_at)`` and
-        reset-indexed — ready for per-team groupby work.
-    """
-    home = matches[["match_id", "scheduled_at", "home_team_id"]].rename(
-        columns={"home_team_id": "team_id"},
-    )
-    home["is_road"] = False
-    away = matches[["match_id", "scheduled_at", "away_team_id"]].rename(
-        columns={"away_team_id": "team_id"},
-    )
-    away["is_road"] = True
-    apps = pd.concat([home, away], ignore_index=True)
-    return apps.sort_values(["team_id", "scheduled_at"]).reset_index(drop=True)
-
-
-def _trailing_game_count(apps: pd.DataFrame, window_days: int) -> pd.Series:
-    """Per-team trailing count of games (inclusive of current) in the last N days.
-
-    Two-pointer sweep, O(N) per team. Off-season gaps need no special
-    handling: the sliding window naturally drops dates outside the window.
-
-    Args:
-        apps: Team-appearance timeline from ``build_team_appearances``.
-        window_days: Lookback window size in days.
-
-    Returns:
-        Series of int64 counts, aligned to ``apps.index``.
-    """
-    window = pd.Timedelta(days=window_days)
-    pieces: list[pd.Series] = []
-    for _, group in apps.groupby("team_id", sort=False):
-        dates  = group["scheduled_at"].to_numpy()
-        counts = [0] * len(dates)
-        left   = 0
-        for right in range(len(dates)):
-            while dates[right] - dates[left] > window:
-                left += 1
-            counts[right] = right - left + 1
-        pieces.append(pd.Series(counts, index=group.index, dtype="int64"))
-    return pd.concat(pieces).sort_index()
-
-
-def _b2b_flag(apps: pd.DataFrame, max_gap_days: int) -> pd.Series:
-    """Per-team back-to-back flag: 1 iff previous game was exactly yesterday.
-
-    Off-season detection takes precedence — even if ``diff == 1`` somehow
-    crosses an inter-season boundary by data quirk, the gap check keeps the
-    flag at 0.
-
-    Args:
-        apps: Team-appearance timeline from ``build_team_appearances``.
-        max_gap_days: Days threshold above which fatigue state resets.
-
-    Returns:
-        Series of int64 flags (0/1), aligned to ``apps.index``.
-    """
-    gaps = apps.groupby("team_id", sort=False)["scheduled_at"].diff().dt.days
-    flag = (gaps == 1) & (gaps <= max_gap_days)
-    return flag.fillna(False).astype("int64")
-
-
-def _consecutive_road_streak(apps: pd.DataFrame, max_gap_days: int) -> pd.Series:
-    """Per-team count of consecutive road appearances ending at this game.
-
-    Resets to 0 when the current appearance is at home (``is_road == False``)
-    or when the gap from the previous appearance exceeds ``max_gap_days``
-    (off-season).
-
-    Args:
-        apps: Team-appearance timeline from ``build_team_appearances``.
-        max_gap_days: Days threshold above which the streak resets.
-
-    Returns:
-        Series of int64 streak counts, aligned to ``apps.index``. Zero for
-        any appearance that is not a road game.
-    """
-    pieces: list[pd.Series] = []
-    for _, group in apps.groupby("team_id", sort=False):
-        road = group["is_road"].to_numpy()
-        gaps = (
-            group["scheduled_at"]
-            .diff()
-            .dt.days
-            .fillna(_NO_PREV_GAME_DAYS)
-            .astype(int)
-            .to_numpy()
-        )
-        streak  = [0] * len(road)
-        current = 0
-        for i in range(len(road)):
-            if gaps[i] > max_gap_days:
-                current = 0
-            if road[i]:
-                current  += 1
-                streak[i] = current
-            else:
-                current   = 0
-                streak[i] = 0
-        pieces.append(pd.Series(streak, index=group.index, dtype="int64"))
-    return pd.concat(pieces).sort_index()
 
 
 def _merge_to_match_sides(
@@ -251,13 +143,13 @@ def add_fatigue_features(matches: pd.DataFrame) -> pd.DataFrame:
     cfg  = _config_from_settings()
     apps = build_team_appearances(matches)
 
-    apps["is_b2b"]           = _b2b_flag(apps, cfg.off_season_max_days)
-    apps["games_last_short"] = _trailing_game_count(apps, cfg.short_window_days)
-    apps["games_last_long"]  = _trailing_game_count(apps, cfg.long_window_days)
+    apps["is_b2b"]           = b2b_flag(apps, cfg.off_season_max_days)
+    apps["games_last_short"] = trailing_game_count(apps, cfg.short_window_days)
+    apps["games_last_long"]  = trailing_game_count(apps, cfg.long_window_days)
     apps["is_high_density"]  = (
         apps["games_last_short"] >= cfg.high_density_threshold
     ).astype("int64")
-    apps["consecutive_road"] = _consecutive_road_streak(apps, cfg.off_season_max_days)
+    apps["consecutive_road"] = consecutive_road_streak(apps, cfg.off_season_max_days)
 
     matches = _merge_to_match_sides(
         matches, apps,

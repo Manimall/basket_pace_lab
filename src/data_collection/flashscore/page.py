@@ -25,6 +25,11 @@ from src.database.models import PeriodType
 
 log = logging.getLogger(__name__)
 
+# Fuzzy-match candidate date window (|db_date - fs_date| ≤ N days).
+_DATE_WINDOW_DAYS: int = 1
+# Regulation quarters parsed per match.
+_REGULATION_QUARTERS: int = 4
+
 # tournament_name (DB) → Flashscore URL path
 LEAGUE_PATHS: dict[str, str] = {
     "NBA":            "/basketball/usa/nba/",
@@ -186,12 +191,27 @@ def find_match(
     away_name: str,
     threshold: float | None = None,
 ) -> FsMatch | None:
+    """Find the Flashscore entry best matching a target match.
+
+    Candidates are restricted to ±``_DATE_WINDOW_DAYS`` of ``target_date``; the
+    best averaged home/away name similarity wins if it clears ``threshold``.
+
+    Args:
+        index: Flashscore match index to search.
+        target_date: DB match date.
+        home_name: DB home-team name.
+        away_name: DB away-team name.
+        threshold: Min similarity; falls back to ``settings.collector.match_threshold``.
+
+    Returns:
+        The best ``FsMatch`` at or above threshold, else None.
+    """
     thr = threshold if threshold is not None else settings.collector.match_threshold
     h_norm, a_norm = _norm(home_name), _norm(away_name)
     best: FsMatch | None = None
     best_score = 0.0
     for entry in index:
-        if entry.match_date and abs((entry.match_date - target_date).days) > 1:
+        if entry.match_date and abs((entry.match_date - target_date).days) > _DATE_WINDOW_DAYS:
             continue
         combined = (_sim(h_norm, entry.home_norm) + _sim(a_norm, entry.away_norm)) / 2
         if combined > best_score:
@@ -200,7 +220,16 @@ def find_match(
 
 
 def build_quarter_rows(fs_match: FsMatch) -> list[QuarterStatRow] | None:
-    if len(fs_match.q_scores) < 4 or all(q[0] is None for q in fs_match.q_scores):
+    """Build regulation quarter stat rows from a Flashscore match.
+
+    Args:
+        fs_match: Parsed Flashscore match with per-quarter scores.
+
+    Returns:
+        Quarter stat rows, or None when fewer than four quarters are present
+        or all quarter scores are missing.
+    """
+    if len(fs_match.q_scores) < _REGULATION_QUARTERS or all(q[0] is None for q in fs_match.q_scores):
         return None
     return [
         QuarterStatRow(
@@ -210,5 +239,5 @@ def build_quarter_rows(fs_match: FsMatch) -> list[QuarterStatRow] | None:
             home_off_reb=None, away_off_reb=None, home_turnovers=None, away_turnovers=None,
             home_possessions=None, away_possessions=None, home_pace=None, away_pace=None,
         )
-        for p, (h, a) in enumerate(fs_match.q_scores[:4], 1)
+        for p, (h, a) in enumerate(fs_match.q_scores[:_REGULATION_QUARTERS], 1)
     ]

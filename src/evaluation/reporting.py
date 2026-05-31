@@ -1,11 +1,8 @@
 """Console output formatting for backtester reports.
 
-Single responsibility: turn ``BetReport`` lists into a readable table on
-stdout. No business logic, no I/O other than printing.
-
-We use ``print`` here on purpose: a formatted table is presentation output,
-not a log event. Log records are emitted by the orchestration layer for
-progress, warnings, and errors.
+Single responsibility: turn ``BetReport`` lists into a readable table. The
+table is rendered as a single multi-line string and emitted via ``log.info``
+so all output flows through the standard logging pipeline (no bare ``print``).
 """
 from __future__ import annotations
 
@@ -52,29 +49,44 @@ def _row_flag(r: BetReport) -> str:
     return _FLAG_WIN if r.profit > 0 else _FLAG_LOSS
 
 
-def print_threshold_table(title: str, rows: list[BetReport]) -> None:
-    """Print a per-threshold report table to stdout.
+def render_threshold_table(title: str, rows: list[BetReport]) -> str:
+    """Render a per-threshold report table as a single multi-line string.
 
     Args:
         title: Header text shown immediately above the table.
         rows: One ``BetReport`` per threshold row, in display order.
+
+    Returns:
+        The fully formatted table (header, rows, legend) ready to log.
     """
     hdr = (
         f"{'Thr':>5s} {'Bets':>5s} {'W':>4s} {'L':>4s} {'P':>3s} "
         f"{'Winrate':>8s} {'ROI':>8s} {'Profit(u)':>10s}  {'ROI CI95':>18s}"
     )
     sep = _TABLE_BORDER_CHAR * len(hdr)
-    print(f"\n{title}")
-    print(f"{sep}\n{hdr}\n{sep}")
+    lines: list[str] = [title, sep, hdr, sep]
     for r in rows:
         flag = _row_flag(r)
         wr   = f"{r.winrate:>6.2f}%" if (r.wins + r.losses) > 0 else f"{'—':>7s}"
         roi  = f"{r.roi:>+6.2f}%"    if r.n > 0 else f"{'—':>7s}"
         ci   = format_roi_ci(r.roi_ci_low, r.roi_ci_high)
-        print(
+        lines.append(
             f"{r.row_label:>5s} {r.n:>5d} {r.wins:>4d} {r.losses:>4d} {r.pushes:>3d} "
             f"{wr:>8s} {roi:>8s} {r.profit:>+10.2f}  {ci:>18s} {flag}"
         )
-    print(sep)
-    print(f"  {_FLAG_SIGNIFICANT} = CI95 lower bound > 0 "
-          "(statistically distinguishable from zero)\n")
+    lines.append(sep)
+    lines.append(
+        f"  {_FLAG_SIGNIFICANT} = CI95 lower bound > 0 "
+        "(statistically distinguishable from zero)"
+    )
+    return "\n".join(lines)
+
+
+def print_threshold_table(title: str, rows: list[BetReport]) -> None:
+    """Log a per-threshold report table via the standard logging pipeline.
+
+    Args:
+        title: Header text shown immediately above the table.
+        rows: One ``BetReport`` per threshold row, in display order.
+    """
+    log.info("\n%s\n", render_threshold_table(title, rows))

@@ -22,6 +22,19 @@ async def get_or_create_team(
     conference: str | None = None,
     division: str | None = None,
 ) -> Team:
+    """Fetch a team by external_id or create it if absent.
+
+    Args:
+        session: Active async DB session.
+        external_id: Source-unique team identifier.
+        name: Full team name.
+        abbreviation: Short team code.
+        conference: Optional conference label.
+        division: Optional division label.
+
+    Returns:
+        The existing or newly-created ``Team``.
+    """
     result = await session.execute(
         select(Team).where(Team.external_id == external_id)
     )

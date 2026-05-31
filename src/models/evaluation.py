@@ -1,11 +1,11 @@
-"""
-CatBoost training, evaluation, and result display helpers.
+"""CatBoost training, evaluation, and result display helpers.
 
 Used by validate_by_league to keep orchestration logic separate.
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -17,8 +17,45 @@ from src.features.score_features import ALL_FEAT, CAT_COLS, TARGET
 
 log = logging.getLogger(__name__)
 
+_TABLE_BORDER_CHAR: str = "─"
+
+
+@dataclass(frozen=True)
+class LeagueResult:
+    """One league's evaluation outcome for the results table.
+
+    Attributes:
+        league:       tournament_name of the evaluated league.
+        n:            Number of test rows.
+        mae:          Model mean absolute error on the test set.
+        rmse:         Model root mean squared error on the test set.
+        baseline_mae: MAE of the naive per-league-mean predictor.
+        avg_q1:       Average Q1 total in the test set (context column).
+    """
+
+    league:       str
+    n:            int
+    mae:          float
+    rmse:         float
+    baseline_mae: float
+    avg_q1:       float
+
+    @property
+    def delta_vs_baseline(self) -> float:
+        """Improvement over baseline MAE (positive = model beats baseline)."""
+        return self.baseline_mae - self.mae
+
 
 def get_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """Split a feature-built frame into model input X and target y.
+
+    Args:
+        df: Feature-built DataFrame containing ``ALL_FEAT`` columns and TARGET.
+
+    Returns:
+        Tuple ``(X, y)`` where X holds the available feature columns (league
+        cast to str) and y is the continuous TARGET series.
+    """
     feat_cols = [c for c in ALL_FEAT if c in df.columns]
     X = df[feat_cols].copy()
     X["league"] = X["league"].astype(str)
@@ -42,6 +79,14 @@ def chrono_split(
 
 
 def train(train_df: pd.DataFrame) -> CatBoostRegressor:
+    """Train the global CatBoost MAE regressor on game_total.
+
+    Args:
+        train_df: Training rows (rows without TARGET are dropped).
+
+    Returns:
+        A fitted ``CatBoostRegressor`` using ``settings.model`` hyperparameters.
+    """
     train_df = train_df.dropna(subset=[TARGET])
     X_tr, y_tr = get_xy(train_df)
     cfg = settings.model
@@ -61,37 +106,53 @@ def train(train_df: pd.DataFrame) -> CatBoostRegressor:
 
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> tuple[float, float]:
+    """Return (MAE, RMSE) for the given predictions."""
     mae  = mean_absolute_error(y_true, y_pred)
-    rmse = mean_squared_error(y_true, y_pred) ** 0.5
+    rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
     return mae, rmse
 
 
-def print_results_table(rows: list[dict]) -> None:
-    rows = sorted(rows, key=lambda r: r["mae"])
+def render_results_table(rows: list[LeagueResult]) -> str:
+    """Render the per-league results table as a single multi-line string.
+
+    Args:
+        rows: One LeagueResult per evaluated league.
+
+    Returns:
+        Formatted table (header, sorted rows, weighted-overall footer).
+    """
+    rows = sorted(rows, key=lambda r: r.mae)
     hdr = (
         f"{'League':<20s} {'N':>5s} {'MAE':>6s} {'RMSE':>6s} "
         f"{'Baseline':>8s} {'Δ vs base':>10s} {'AvgQ1':>6s}"
     )
-    sep = "─" * len(hdr)
-    print(f"\n{sep}\n{hdr}\n{sep}")
+    sep = _TABLE_BORDER_CHAR * len(hdr)
+    lines: list[str] = [sep, hdr, sep]
     for r in rows:
-        delta = r["baseline_mae"] - r["mae"]
-        flag  = "✓" if delta > 0 else "✗"
-        print(
-            f"{r['league']:<20s} {r['n']:>5d} "
-            f"{r['mae']:>6.2f} {r['rmse']:>6.2f} "
-            f"{r['baseline_mae']:>8.2f} {delta:>+10.2f} {flag} "
-            f"{r['avg_q1']:>6.1f}"
+        flag = "✓" if r.delta_vs_baseline > 0 else "✗"
+        lines.append(
+            f"{r.league:<20s} {r.n:>5d} "
+            f"{r.mae:>6.2f} {r.rmse:>6.2f} "
+            f"{r.baseline_mae:>8.2f} {r.delta_vs_baseline:>+10.2f} {flag} "
+            f"{r.avg_q1:>6.1f}"
         )
-    print(sep)
-    total_n = sum(r["n"] for r in rows)
-    w_mae   = sum(r["mae"]  * r["n"] for r in rows) / total_n
-    w_rmse  = sum(r["rmse"] * r["n"] for r in rows) / total_n
-    w_base  = sum(r["baseline_mae"] * r["n"] for r in rows) / total_n
-    w_delta = w_base - w_mae
-    print(
-        f"{'OVERALL (weighted)':<20s} {total_n:>5d} "
-        f"{w_mae:>6.2f} {w_rmse:>6.2f} "
-        f"{w_base:>8.2f} {w_delta:>+10.2f} {'✓' if w_delta > 0 else '✗'}"
-    )
-    print(sep + "\n")
+    lines.append(sep)
+
+    total_n = sum(r.n for r in rows)
+    if total_n > 0:
+        w_mae   = sum(r.mae  * r.n for r in rows) / total_n
+        w_rmse  = sum(r.rmse * r.n for r in rows) / total_n
+        w_base  = sum(r.baseline_mae * r.n for r in rows) / total_n
+        w_delta = w_base - w_mae
+        lines.append(
+            f"{'OVERALL (weighted)':<20s} {total_n:>5d} "
+            f"{w_mae:>6.2f} {w_rmse:>6.2f} "
+            f"{w_base:>8.2f} {w_delta:>+10.2f} {'✓' if w_delta > 0 else '✗'}"
+        )
+        lines.append(sep)
+    return "\n".join(lines)
+
+
+def print_results_table(rows: list[LeagueResult]) -> None:
+    """Log the per-league results table via the standard logging pipeline."""
+    log.info("\n%s\n", render_results_table(rows))

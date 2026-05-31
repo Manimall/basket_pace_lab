@@ -25,7 +25,7 @@ from src.data_collection.chinanbl.page import (
 )
 from src.data_collection.constants import DEFAULT_USER_AGENT
 from src.database import crud
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 from src.database.models import MatchStatus, SeasonType
 
 log = logging.getLogger(__name__)
@@ -92,11 +92,12 @@ async def _process_event(
 
 
 class ChinaNBLCollector(BaseCollector):
-    def __init__(self, session_factory: Any = None, fetch_stats: bool = True) -> None:
+    def __init__(self, session_factory: SessionFactory | None = None, fetch_stats: bool = True) -> None:
         self._sf          = session_factory or get_session_factory()
         self._fetch_stats = fetch_stats
 
     async def run(self) -> None:
+        """Scrape ChinaNBL events for the configured seasons and persist them."""
         async with async_playwright() as pw:
             browser: Browser = await pw.chromium.launch(headless=True)
             ctx: BrowserContext = await browser.new_context(
