@@ -7,3 +7,6 @@ __pycache__/
 .pytest_cache/
 cookies.json
 catboost_info/
+
+# Agent-local skills cache — not part of the project code
+.agents/
