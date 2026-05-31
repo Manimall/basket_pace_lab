@@ -15,7 +15,6 @@ import logging
 import random
 import sys
 import time
-from typing import Any
 
 from playwright.async_api import async_playwright
 from sqlalchemy import text
@@ -29,7 +28,7 @@ from src.data_collection.sofascore.event import (
     load_existing_external_ids,
     process_event,
 )
-from src.database.engine import create_tables, dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, create_tables, dispose_engine, get_session_factory
 
 log = logging.getLogger("mass_scheduler")
 
@@ -37,7 +36,7 @@ log = logging.getLogger("mass_scheduler")
 class MassScheduler(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         max_pages: int = 50,
         league_filter: list[str] | None = None,
         season_filter: list[str] | None = None,

@@ -33,7 +33,7 @@ from src.data_collection.flashscore.id_matcher_config import (
 )
 from src.data_collection.flashscore.norm import FsMatch, _norm, _sim
 from src.data_collection.flashscore.page import build_index_from_url, find_match
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ def _score(target: _DbMatch, entry: FsMatch) -> float:
 
 
 async def _load_db_matches(
-    sf: Any, db_filter: str, limit: int | None,
+    sf: SessionFactory, db_filter: str, limit: int | None,
 ) -> list[_DbMatch]:
     lim = f"LIMIT {int(limit)}" if limit else ""
     sql = f"""
@@ -83,7 +83,7 @@ async def _load_db_matches(
     ]
 
 
-async def _save_flashscore_id(sf: Any, match_id: int, fs_id: str) -> None:
+async def _save_flashscore_id(sf: SessionFactory, match_id: int, fs_id: str) -> None:
     async with sf() as db:
         async with db.begin():
             await db.execute(

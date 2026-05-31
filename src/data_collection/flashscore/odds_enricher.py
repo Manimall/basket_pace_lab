@@ -22,7 +22,6 @@ import random
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from playwright.async_api import async_playwright
 
@@ -35,7 +34,7 @@ from src.data_collection.flashscore.odds import (
 )
 from src.data_collection.flashscore.odds_db import OddsTarget, load_odds_targets, save_odds
 from src.data_collection.flashscore.page import LEAGUE_PATHS
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ class _RunStats:
 class OddsEnricher(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         leagues: list[str] | None = None,
         limit: int | None = None,
         dry_run: bool = False,

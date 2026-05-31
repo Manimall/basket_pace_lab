@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from sqlalchemy import text
 
 from src.data_collection.flashscore.norm import _norm
 from src.data_collection.sofascore.id_finder.models import DbRow
+from src.database.engine import SessionFactory
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ _LOAD_FS_ROWS_SQL: str = """
 _PATCH_SQL: str = "UPDATE matches SET external_id = :eid WHERE id = :mid"
 
 
-async def load_fs_rows(sf: Any, db_tournament_name: str) -> list[DbRow]:
+async def load_fs_rows(sf: SessionFactory, db_tournament_name: str) -> list[DbRow]:
     """Load matches with Flashscore IDs that still need a Sofascore event ID."""
     async with sf() as db:
         rows = (
@@ -46,7 +46,7 @@ async def load_fs_rows(sf: Any, db_tournament_name: str) -> list[DbRow]:
     ]
 
 
-async def patch_external_id(sf: Any, match_id: int, new_ext_id: str) -> None:
+async def patch_external_id(sf: SessionFactory, match_id: int, new_ext_id: str) -> None:
     """Overwrite a row's external_id with the resolved numeric Sofascore ID."""
     async with sf() as db:
         async with db.begin():

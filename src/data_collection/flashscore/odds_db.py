@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import text
 
 from src.data_collection.flashscore.odds import OddsRow
+from src.database.engine import SessionFactory
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class OddsTarget:
 
 
 async def load_odds_targets(
-    sf: Any,
+    sf: SessionFactory,
     leagues: list[str] | None = None,
     limit: int | None = None,
     offset: int | None = None,
@@ -103,7 +104,7 @@ async def load_odds_targets(
     return targets
 
 
-async def save_odds(sf: Any, match_id: int, odds: OddsRow) -> None:
+async def save_odds(sf: SessionFactory, match_id: int, odds: OddsRow) -> None:
     """Persist scraped O/U closing line to the matches table.
 
     Args:

@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import text
 
 from src.database.crud import QuarterStatRow, save_quarter_stats
+from src.database.engine import SessionFactory
 from src.data_collection.flashscore.norm import DbMatch
 
 log = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ SEASON_FILTERS: dict[str, str] = {
 
 
 async def save_enriched(
-    db_session_factory: Any,
+    db_session_factory: SessionFactory,
     match_id: int,
     fs_id: str,
     quarter_rows: list[QuarterStatRow],
@@ -50,7 +51,7 @@ async def save_enriched(
 
 
 async def load_db_matches(
-    db_session_factory: Any,
+    db_session_factory: SessionFactory,
     leagues: list[str] | None,
     season_codes: list[str] | None,
     limit: int | None,
@@ -67,7 +68,7 @@ async def load_db_matches(
         Matching ``DbMatch`` records ordered by scheduled_at DESC.
     """
     conditions = ["m.has_quarter_breakdown = FALSE", "m.home_score_final IS NOT NULL"]
-    params: dict = {}
+    params: dict[str, Any] = {}
 
     if leagues:
         conditions.append("m.tournament_name = ANY(:leagues)")
@@ -114,7 +115,7 @@ async def load_db_matches(
     ]
 
 
-async def ensure_flashscore_id_column(db_session_factory: Any) -> None:
+async def ensure_flashscore_id_column(db_session_factory: SessionFactory) -> None:
     """Idempotently add the ``matches.flashscore_id`` column if it is missing."""
     async with db_session_factory() as db:
         async with db.begin():

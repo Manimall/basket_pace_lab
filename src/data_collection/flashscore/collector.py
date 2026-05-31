@@ -19,7 +19,6 @@ import random
 import argparse
 import sys
 import time
-from typing import Any
 
 from playwright.async_api import async_playwright
 
@@ -29,7 +28,7 @@ from src.data_collection.constants import FLASHSCORE_BASE_URL, USER_AGENTS
 from src.data_collection.flashscore.collector_page import (
     COLLECTOR_LEAGUES, FsCollectedMatch, save_match, scrape_results_page,
 )
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger("flashscore_collector")
 
@@ -37,7 +36,7 @@ log = logging.getLogger("flashscore_collector")
 class FlashscoreCollector(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         leagues: list[str] | None = None,
         dry_run: bool = False,
     ) -> None:

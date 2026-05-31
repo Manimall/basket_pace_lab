@@ -35,7 +35,7 @@ from src.data_collection.flashscore.norm import (  # noqa: F401 — re-exported 
 from src.data_collection.flashscore.page import (
     LEAGUE_PATHS, build_league_index, build_quarter_rows, find_match,
 )
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger("flashscore_enricher")
 
@@ -43,7 +43,7 @@ log = logging.getLogger("flashscore_enricher")
 class FlashscoreEnricher(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         leagues: list[str] | None = None,
         season_codes: list[str] | None = None,
         limit: int | None = None,

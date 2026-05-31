@@ -11,7 +11,6 @@ import logging
 from dataclasses import dataclass
 
 from curl_cffi.requests import AsyncSession
-from sqlalchemy.ext.asyncio import AsyncSession as SaSession, async_sessionmaker
 
 from src.data_collection.sofascore.catalog import LEAGUE_CATALOG
 from src.data_collection.sofascore.id_finder.config import (
@@ -33,12 +32,9 @@ from src.data_collection.sofascore.id_finder.sofa_client import (
     fetch_events_for_season,
     load_cookie_header,
 )
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
-
-# Async session factory returned by get_session_factory().
-SessionFactory = async_sessionmaker[SaSession]
 
 
 @dataclass

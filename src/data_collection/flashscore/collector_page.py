@@ -17,6 +17,7 @@ from playwright.async_api import Page
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
 from src.data_collection.flashscore.collector_config import COLLECTOR_LEAGUES, CollectorLeague
+from src.database.engine import SessionFactory
 from src.data_collection.flashscore.collector_parse import abbrev, parse_fs_datetime
 from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow, get_or_create_team, save_quarter_stats, upsert_match
@@ -145,7 +146,7 @@ async def scrape_results_page(page: Page, path: str) -> list[FsCollectedMatch]:
 
 
 async def save_match(
-    session_factory: Any,
+    session_factory: SessionFactory,
     league_key: str,
     config: CollectorLeague,
     m: FsCollectedMatch,

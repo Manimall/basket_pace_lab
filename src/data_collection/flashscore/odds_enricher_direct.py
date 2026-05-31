@@ -25,7 +25,6 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any
 
 from playwright.async_api import async_playwright
 
@@ -35,7 +34,7 @@ from src.data_collection.constants import FLASHSCORE_BASE_URL
 from src.data_collection.flashscore.browser import make_flashscore_session
 from src.data_collection.flashscore.odds import scrape_match_odds
 from src.data_collection.flashscore.odds_db import load_odds_targets, save_odds
-from src.database.engine import dispose_engine, get_session_factory
+from src.database.engine import SessionFactory, dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ class _RunStats:
 class DirectOddsEnricher(BaseCollector):
     def __init__(
         self,
-        session_factory: Any = None,
+        session_factory: SessionFactory | None = None,
         leagues: list[str] | None = None,
         limit: int | None = None,
         offset: int | None = None,

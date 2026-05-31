@@ -13,6 +13,7 @@ from playwright.async_api import Page
 from sqlalchemy import text
 
 from src.database import crud
+from src.database.engine import SessionFactory
 from src.database.crud import QuarterStatRow
 from src.database.models import MatchStatus, SeasonType
 from src.data_collection.constants import SOFASCORE_API_HEADERS
@@ -82,7 +83,7 @@ async def fetch_event_ids(
     return ids
 
 
-async def load_existing_external_ids(session_factory: Any) -> set[str]:
+async def load_existing_external_ids(session_factory: SessionFactory) -> set[str]:
     """Return external_ids of matches that already have quarter_stats."""
     async with session_factory() as db:
         rows = await db.execute(text("""
@@ -99,7 +100,7 @@ async def process_event(
     event_id: int,
     tournament_id: int,
     tournament_name: str,
-    session_factory: Any,
+    session_factory: SessionFactory,
     existing_ids: set[str],
 ) -> str:
     """Fetch, parse, and persist one event. Returns 'ok'|'skip'|'exists'|'error'."""
