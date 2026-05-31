@@ -6,7 +6,6 @@ plus matchup features. Used exclusively by validate_by_league.py.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date
 

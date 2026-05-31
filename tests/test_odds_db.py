@@ -99,7 +99,8 @@ def test_save_odds_issues_update_with_correct_params() -> None:
         bookmaker="bet365",
         scraped_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
-    asyncio.run(save_odds(sf, match_id=42, odds=odds))
+    # `odds` is a SimpleNamespace duck-typing OddsRow for the mock — intentional.
+    asyncio.run(save_odds(sf, match_id=42, odds=odds))  # type: ignore[arg-type]
 
     params = execute_mock.call_args.args[1]
     assert params["close"] == 185.5

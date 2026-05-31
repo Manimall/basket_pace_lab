@@ -17,11 +17,11 @@ from playwright.async_api import Page
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
 from src.data_collection.flashscore.collector_config import COLLECTOR_LEAGUES, CollectorLeague
-from src.database.engine import SessionFactory
 from src.data_collection.flashscore.collector_parse import abbrev, parse_fs_datetime
 from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow, get_or_create_team, save_quarter_stats, upsert_match
-from src.database.models import MatchStatus, PeriodType, SeasonType
+from src.database.engine import SessionFactory
+from src.database.models import MatchStatus, PeriodType
 
 log = logging.getLogger(__name__)
 

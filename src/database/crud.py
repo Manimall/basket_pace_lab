@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import Match, PeriodType, QuarterStats, Team
 
-
 # ---------------------------------------------------------------------------
 # Team
 # ---------------------------------------------------------------------------

@@ -14,7 +14,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import sys
 from dataclasses import dataclass
@@ -27,9 +26,9 @@ from sqlalchemy import text
 from src.data_collection.base import BaseCollector
 from src.data_collection.flashscore.browser import make_flashscore_session
 from src.data_collection.flashscore.id_matcher_config import (
+    LEAGUES,
     MATCH_THRESHOLD,
     LeagueConfig,
-    LEAGUES,
 )
 from src.data_collection.flashscore.norm import FsMatch, _norm, _sim
 from src.data_collection.flashscore.page import build_index_from_url, find_match
@@ -99,7 +98,7 @@ class FlashscoreIdMatcher(BaseCollector):
         dry_run: bool = False,
         limit: int | None = None,
     ) -> None:
-        unknown = [l for l in leagues if l not in LEAGUES]
+        unknown = [lg for lg in leagues if lg not in LEAGUES]
         if unknown:
             raise ValueError(f"Unknown leagues: {unknown}. Available: {list(LEAGUES)}")
         self._leagues = leagues

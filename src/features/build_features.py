@@ -27,7 +27,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import settings
-from src.data_collection.sofascore_client import FTA_TO_POSS_FACTOR  # noqa: F401 — re-exported for notebooks
+from src.data_collection.sofascore_client import (
+    FTA_TO_POSS_FACTOR,  # noqa: F401 — re-exported for notebooks
+)
 from src.database.engine import get_session_factory
 from src.features.match_stats import add_context, calc_match_stats
 from src.features.rolling_utils import MATCHUP_COLS, compute_matchup_features

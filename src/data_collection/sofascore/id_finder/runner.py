@@ -126,7 +126,9 @@ async def run(opts: FinderOptions) -> None:
         log.warning("No cookies — Sofascore may return 403.")
 
     totals = _Totals()
-    async with AsyncSession(impersonate=IMPERSONATE_PROFILE) as session:
+    # IMPERSONATE_PROFILE is a valid curl_cffi profile string ("chrome124");
+    # curl_cffi types it as a Literal, so a plain str needs an explicit ignore.
+    async with AsyncSession(impersonate=IMPERSONATE_PROFILE) as session:  # type: ignore[arg-type]
         for league_key in opts.leagues:
             if league_key not in LEAGUE_CATALOG:
                 log.error("League '%s' not in LEAGUE_CATALOG — add it first.", league_key)

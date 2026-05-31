@@ -17,9 +17,9 @@ from sklearn.metrics import log_loss, roc_auc_score
 from src.config import settings
 from src.evaluation.config import BIN_TARGET, LINE_COL
 from src.evaluation.feature_selector import (
-    FeatureGroup,
     _ALWAYS_EXCLUDED,
     _GROUP_COLUMNS,
+    FeatureGroup,
 )
 from src.evaluation.grid_search.periods import PERIOD_CONFIGS, Period
 from src.evaluation.simulation import BetReport, SimulationParams, run_threshold_sweep

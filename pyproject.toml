@@ -1,0 +1,26 @@
+# Tooling configuration for ruff (lint) and mypy (type-check).
+# The project ships with requirements.txt (not a PEP 517 build); this file holds
+# only [tool.*] sections, so no [build-system] is declared.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Generated / vendored dirs that must never be linted.
+extend-exclude = ["catboost_info", "src/etl_scout"]
+
+[tool.ruff.lint]
+# E = pycodestyle errors, F = pyflakes, I = isort (import sorting).
+select = ["E", "F", "I"]
+# E501 (line-too-long) is intentionally off: the project keeps hand-aligned
+# columns and does NOT adopt `ruff format`, so line length is not enforced.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+# Third-party libs (pandas, catboost, curl_cffi, playwright, …) ship without
+# type stubs; don't fail the build on their missing imports.
+ignore_missing_imports = true
+# Understands pydantic models / computed_field (@computed_field over @property).
+plugins = ["pydantic.mypy"]
+# Dev-only research utilities and generated dirs are not type-checked.
+exclude = ['^tools/', '^catboost_info/', '^src/etl_scout/']

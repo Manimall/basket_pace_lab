@@ -21,7 +21,7 @@ import logging
 import random
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from playwright.async_api import async_playwright
 
@@ -29,8 +29,10 @@ from src.config import settings
 from src.data_collection.base import BaseCollector
 from src.data_collection.constants import FLASHSCORE_BASE_URL, USER_AGENTS
 from src.data_collection.flashscore.odds import (
-    dismiss_overlays, get_match_url_via_click,
-    prepare_results_page, scrape_match_odds,
+    dismiss_overlays,
+    get_match_url_via_click,
+    prepare_results_page,
+    scrape_match_odds,
 )
 from src.data_collection.flashscore.odds_db import OddsTarget, load_odds_targets, save_odds
 from src.data_collection.flashscore.page import LEAGUE_PATHS

@@ -7,14 +7,12 @@ reset behaviour.
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from src.features.fatigue import (
     FATIGUE_FEATURE_COLS,
     add_fatigue_features,
     build_team_appearances,
 )
-
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 

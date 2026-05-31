@@ -30,7 +30,6 @@ from src.features.fatigue import FATIGUE_FEATURE_COLS
 from src.features.score_features import BM_COLS
 from src.features.team_advanced import TEAM_ADV_FEAT_COLS
 
-
 # ── V4 invariant: bookmaker columns always hidden ─────────────────────────────
 
 def test_bm_cols_always_excluded_regardless_of_league() -> None:
@@ -213,6 +212,7 @@ def test_nba_base_feature_not_excluded() -> None:
 def test_run_league_backtest_skips_cba(caplog: pytest.LogCaptureFixture) -> None:
     """run_league_backtest должен вернуть None и залогировать ПРОПУСК для CBA."""
     from unittest.mock import patch
+
     from src.evaluation.backtest_league import run_league_backtest
 
     with patch("src.evaluation.backtest_league.prepare_dataset") as mock_ds, \
@@ -226,7 +226,8 @@ def test_run_league_backtest_skips_cba(caplog: pytest.LogCaptureFixture) -> None
 
 def test_run_league_backtest_allows_acb() -> None:
     """ACB НЕ должна блокироваться — у неё жёсткий порог, а не бан."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
+
     from src.evaluation.backtest_league import run_league_backtest
 
     # Мокаем всю цепочку кроме проверки блокировки

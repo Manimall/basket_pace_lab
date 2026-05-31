@@ -20,14 +20,13 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import Page, async_playwright
 
 from src.config import settings
+from src.data_collection.parsers import SCORE_KEY_MAP, parse_period, safe_int
 from src.database import crud
-from src.database.crud import QuarterStatRow
 from src.database.engine import create_tables, dispose_engine, get_session_factory
 from src.database.models import MatchStatus, SeasonType
-from src.data_collection.parsers import PERIOD_MAP, SCORE_KEY_MAP, parse_period, safe_int
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,11 +52,14 @@ def _parse_args() -> tuple[int, int, int]:
     i = 0
     while i < len(args):
         if args[i] == "--tournament" and i + 1 < len(args):
-            tournament = int(args[i + 1]); i += 2
+            tournament = int(args[i + 1])
+            i += 2
         elif args[i] == "--season" and i + 1 < len(args):
-            season = int(args[i + 1]); i += 2
+            season = int(args[i + 1])
+            i += 2
         elif args[i] == "--pages" and i + 1 < len(args):
-            pages = int(args[i + 1]); i += 2
+            pages = int(args[i + 1])
+            i += 2
         else:
             i += 1
     return tournament, season, pages

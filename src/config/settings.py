@@ -11,13 +11,15 @@ class DatabaseSettings(BaseSettings):
     user: str = "postgres"
     password: str = "postgres"
 
-    @computed_field
+    # mypy core doesn't support stacking a decorator on @property; the
+    # @computed_field @property pair is the canonical pydantic v2 idiom.
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def async_dsn(self) -> str:
         """Return the asyncpg SQLAlchemy DSN for this database config."""
         return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def sync_dsn(self) -> str:
         """Return the psycopg2 SQLAlchemy DSN for this database config."""

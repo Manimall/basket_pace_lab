@@ -10,9 +10,9 @@ from typing import Any
 
 from sqlalchemy import text
 
+from src.data_collection.flashscore.norm import DbMatch
 from src.database.crud import QuarterStatRow, save_quarter_stats
 from src.database.engine import SessionFactory
-from src.data_collection.flashscore.norm import DbMatch
 
 log = logging.getLogger(__name__)
 

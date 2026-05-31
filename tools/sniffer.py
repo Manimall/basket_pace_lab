@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from playwright.async_api import Browser, Page, Request, Response, async_playwright
+from playwright.async_api import Browser, Page, Response, async_playwright
 
 # ---------------------------------------------------------------------------
 # Config — меняй под нужный источник / матч
@@ -169,7 +169,7 @@ async def run_sniffer(target_url: str) -> None:
         print(f"\n{'='*70}")
         print(f"  Target : {target_url}")
         print(f"  Wait   : {PAGE_LOAD_WAIT_SEC}s after load")
-        print(f"  Filter : JSON responses (stat endpoints marked [STAT])")
+        print("  Filter : JSON responses (stat endpoints marked [STAT])")
         print(f"{'='*70}\n")
 
         await page.goto(target_url, wait_until="domcontentloaded", timeout=30_000)
@@ -184,18 +184,18 @@ async def run_sniffer(target_url: str) -> None:
     all_json = [e for e in captured if not e.is_stat]
 
     print(f"\n{'='*70}")
-    print(f"  SUMMARY")
+    print("  SUMMARY")
     print(f"{'='*70}")
     print(f"  Total JSON responses : {len(captured)}")
     print(f"  Stat-like endpoints  : {len(stat_endpoints)}")
 
     if stat_endpoints:
-        print(f"\n  --- STAT ENDPOINTS (copy these) ---")
+        print("\n  --- STAT ENDPOINTS (copy these) ---")
         for ep in stat_endpoints:
             print(f"  {ep.url}")
 
     if all_json:
-        print(f"\n  --- ALL OTHER JSON ENDPOINTS ---")
+        print("\n  --- ALL OTHER JSON ENDPOINTS ---")
         for ep in all_json:
             print(f"  {ep.url}")
 

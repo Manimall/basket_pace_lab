@@ -18,7 +18,7 @@ from playwright.async_api import Page
 
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
-from src.data_collection.flashscore.norm import FsMatch, QScore, _norm, _sim
+from src.data_collection.flashscore.norm import FsMatch, _norm, _sim
 from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow
 from src.database.models import PeriodType
