@@ -16,6 +16,7 @@ from playwright.async_api import Page
 
 from src.config import settings
 from src.data_collection.constants import FLASHSCORE_BASE_URL
+from src.data_collection.flashscore.collector_config import COLLECTOR_LEAGUES, CollectorLeague
 from src.data_collection.flashscore.collector_parse import abbrev, parse_fs_datetime
 from src.data_collection.flashscore.odds import dismiss_overlays
 from src.database.crud import QuarterStatRow, get_or_create_team, save_quarter_stats, upsert_match
@@ -25,74 +26,15 @@ log = logging.getLogger(__name__)
 
 QScore = tuple[int | None, int | None]
 
-# league_key → config
-COLLECTOR_LEAGUES: dict[str, dict] = {
-    "LegaA": {
-        "path":            "/basketball/italy/lega-a/",
-        "tournament_name": "LegaA",
-        "season":          "Lega A 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "PBA_PhilCup": {
-        "path":            "/basketball/philippines/pba-philippine-cup/",
-        "tournament_name": "PBA_PhilCup",
-        "season":          "PBA Philippine Cup 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "PBA_CommCup": {
-        "path":            "/basketball/philippines/pba-commissioner-s-cup/",
-        "tournament_name": "PBA_CommCup",
-        "season":          "PBA Commissioner's Cup 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "PBA_GovCup": {
-        "path":            "/basketball/philippines/pba-governors-cup/",
-        "tournament_name": "PBA_GovCup",
-        "season":          "PBA Governors' Cup 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "Taiwan_PLeague": {
-        "path":            "/basketball/taiwan/p-league/",
-        "tournament_name": "Taiwan_PLeague",
-        "season":          "P.League+ 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "Taiwan_TPBL": {
-        "path":            "/basketball/taiwan/tpbl/",
-        "tournament_name": "Taiwan_TPBL",
-        "season":          "TPBL 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    # Adriatic League — pivot target after V6 (NBA market efficiency ceiling).
-    # Sponsor naming on Flashscore: "AdmiralBet ABA League".
-    # All three seasons share tournament_name="ABA" → data merges in one bucket.
-    "ABA": {
-        "path":            "/basketball/europe/admiralbet-aba-league/",
-        "tournament_name": "ABA",
-        "season":          "ABA League 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "ABA_2425": {
-        "path":            "/basketball/europe/admiralbet-aba-league-2024-2025/",
-        "tournament_name": "ABA",
-        "season":          "ABA League 24/25",
-        "season_type":     SeasonType.REGULAR,
-    },
-    "ABA_2324": {
-        "path":            "/basketball/europe/admiralbet-aba-league-2023-2024/",
-        "tournament_name": "ABA",
-        "season":          "ABA League 23/24",
-        "season_type":     SeasonType.REGULAR,
-    },
-    # Israeli Super League — R&D candidate: shifted calendar (war-affected),
-    # mid-season scoring anomaly with US legionnaires playing pure-stats basketball.
-    "Israel": {
-        "path":            "/basketball/israel/super-league/",
-        "tournament_name": "Israel",
-        "season":          "Super League 25/26",
-        "season_type":     SeasonType.REGULAR,
-    },
-}
+# Synthetic team external_id is "fs_{tournament}_{team_name[:N]}" — cap name length.
+_TEAM_NAME_MAX_LEN: int = 30
+# Regulation quarters persisted per match (overtime handled separately).
+_REGULATION_QUARTERS: int = 4
+
+__all__ = [
+    "COLLECTOR_LEAGUES", "CollectorLeague", "FsCollectedMatch",
+    "scrape_results_page", "save_match",
+]
 
 _JS_COLLECT_MATCHES = r"""
 () => {
@@ -150,6 +92,18 @@ class FsCollectedMatch:
 
 
 async def scrape_results_page(page: Page, path: str) -> list[FsCollectedMatch]:
+    """Scrape one league's results page into a list of finished matches.
+
+    Expands all "show more matches" pages, extracts match rows via JS, and
+    keeps only rows with a Flashscore id and at least one final score.
+
+    Args:
+        page: An active Playwright page.
+        path: Flashscore league path fragment (``results/`` is appended).
+
+    Returns:
+        Parsed ``FsCollectedMatch`` records (possibly empty).
+    """
     url = FLASHSCORE_BASE_URL + path + "results/"
     log.info("  Scraping: %s", url)
     await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
@@ -193,14 +147,26 @@ async def scrape_results_page(page: Page, path: str) -> list[FsCollectedMatch]:
 async def save_match(
     session_factory: Any,
     league_key: str,
-    config: dict,
+    config: CollectorLeague,
     m: FsCollectedMatch,
 ) -> bool:
+    """Upsert one scraped match plus its quarter scores.
+
+    Args:
+        session_factory: Async session factory for the write transaction.
+        league_key: Catalog key of the league (for logging/context).
+        config: League configuration (tournament_name, season, season_type).
+        m: The scraped match to persist.
+
+    Returns:
+        ``True`` if the match was written, ``False`` when it had no parseable
+        datetime (and was therefore skipped).
+    """
     if m.match_dt is None:
         return False
     external_id = f"fs_{m.fs_id}"
-    home_ext = f"fs_{config['tournament_name']}_{m.home_raw[:30]}"
-    away_ext = f"fs_{config['tournament_name']}_{m.away_raw[:30]}"
+    home_ext = f"fs_{config['tournament_name']}_{m.home_raw[:_TEAM_NAME_MAX_LEN]}"
+    away_ext = f"fs_{config['tournament_name']}_{m.away_raw[:_TEAM_NAME_MAX_LEN]}"
 
     async with session_factory() as db:
         async with db.begin():
@@ -223,7 +189,7 @@ async def save_match(
                     home_off_reb=None, away_off_reb=None, home_turnovers=None, away_turnovers=None,
                     home_possessions=None, away_possessions=None, home_pace=None, away_pace=None,
                 )
-                for period, (h_score, a_score) in enumerate(m.q_scores[:4], 1)
+                for period, (h_score, a_score) in enumerate(m.q_scores[:_REGULATION_QUARTERS], 1)
             ]
             if quarter_rows:
                 await save_quarter_stats(db, match.id, quarter_rows)

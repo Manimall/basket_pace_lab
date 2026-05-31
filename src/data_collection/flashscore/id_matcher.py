@@ -13,6 +13,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import sys
@@ -107,6 +108,7 @@ class FlashscoreIdMatcher(BaseCollector):
         self._sf      = get_session_factory()
 
     async def run(self) -> None:
+        """Match every configured league's DB matches to Flashscore ids."""
         totals = {"matched": 0, "unmatched": 0}
 
         async with async_playwright() as pw:
@@ -193,24 +195,18 @@ class FlashscoreIdMatcher(BaseCollector):
                 )
 
 
-def _parse_args() -> dict[str, Any]:
-    args = sys.argv[1:]
-    opts: dict[str, Any] = {"leagues": list(LEAGUES), "dry_run": False, "limit": None}
-    i = 0
-    while i < len(args):
-        if args[i] == "--leagues" and i + 1 < len(args):
-            vals: list[str] = []
-            i += 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["leagues"] = vals
-        elif args[i] == "--dry-run":
-            opts["dry_run"] = True; i += 1
-        elif args[i] == "--limit" and i + 1 < len(args):
-            opts["limit"] = int(args[i + 1]); i += 2
-        else:
-            i += 1
-    return opts
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI options for the Flashscore ID matcher.
+
+    Returns:
+        Namespace with ``leagues`` (defaults to all configured leagues),
+        ``dry_run`` (bool), and ``limit`` (int | None).
+    """
+    p = argparse.ArgumentParser(description="Assign flashscore_id to DB matches via fuzzy match.")
+    p.add_argument("--leagues", nargs="+", default=list(LEAGUES), help="League keys to process.")
+    p.add_argument("--dry-run", action="store_true", help="Match but do not write.")
+    p.add_argument("--limit", type=int, default=None, help="Max matches per league.")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
@@ -219,9 +215,9 @@ if __name__ == "__main__":
         format="%(asctime)s | %(levelname)-8s | %(message)s",
         stream=sys.stdout,
     )
-    opts = _parse_args()
+    args = _parse_args()
     FlashscoreIdMatcher(
-        leagues=opts["leagues"],
-        dry_run=opts["dry_run"],
-        limit=opts["limit"],
+        leagues=args.leagues,
+        dry_run=args.dry_run,
+        limit=args.limit,
     ).run_sync()

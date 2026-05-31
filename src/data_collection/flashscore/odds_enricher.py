@@ -54,6 +54,7 @@ class _RunStats:
     err:    int = 0
 
     def update(self, other: _RunStats) -> None:
+        """Add another stats bundle's counters into this one in place."""
         self.ok     += other.ok
         self.nohref += other.nohref
         self.noodds += other.noodds
@@ -74,6 +75,7 @@ class OddsEnricher(BaseCollector):
         self._dry_run = dry_run
 
     async def run(self) -> None:
+        """Scrape and persist closing O/U lines for matches needing them."""
         log.info("DB: %s:%s/%s", settings.db.host, settings.db.port, settings.db.name)
 
         targets = await load_odds_targets(self._sf, self._leagues, self._limit)

@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 
 from curl_cffi.requests import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession as SaSession, async_sessionmaker
 
 from src.data_collection.sofascore.catalog import LEAGUE_CATALOG
 from src.data_collection.sofascore.id_finder.config import (
@@ -35,6 +36,9 @@ from src.data_collection.sofascore.id_finder.sofa_client import (
 from src.database.engine import dispose_engine, get_session_factory
 
 log = logging.getLogger(__name__)
+
+# Async session factory returned by get_session_factory().
+SessionFactory = async_sessionmaker[SaSession]
 
 
 @dataclass
@@ -75,8 +79,24 @@ async def _collect_season_events(
 
 
 async def _match_and_patch(
-    sf, league_key: str, db_rows: list[DbRow], events: list[SofaEvent], opts: FinderOptions,
+    sf: SessionFactory,
+    league_key: str,
+    db_rows: list[DbRow],
+    events: list[SofaEvent],
+    opts: FinderOptions,
 ) -> tuple[int, int]:
+    """Match each DB row to a Sofascore event and patch external_id.
+
+    Args:
+        sf: Async session factory for DB writes.
+        league_key: Catalog key of the league being processed.
+        db_rows: Flashscore-sourced rows needing a Sofascore ID.
+        events: Sofascore events fetched for this league's seasons.
+        opts: Finder options (threshold, dry-run flag).
+
+    Returns:
+        Tuple ``(matched, unmatched)`` counts for this league.
+    """
     matched = unmatched = 0
     hints: list[tuple[DbRow, str]] = []
     for row in db_rows:

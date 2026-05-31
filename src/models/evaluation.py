@@ -47,6 +47,15 @@ class LeagueResult:
 
 
 def get_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """Split a feature-built frame into model input X and target y.
+
+    Args:
+        df: Feature-built DataFrame containing ``ALL_FEAT`` columns and TARGET.
+
+    Returns:
+        Tuple ``(X, y)`` where X holds the available feature columns (league
+        cast to str) and y is the continuous TARGET series.
+    """
     feat_cols = [c for c in ALL_FEAT if c in df.columns]
     X = df[feat_cols].copy()
     X["league"] = X["league"].astype(str)
@@ -70,6 +79,14 @@ def chrono_split(
 
 
 def train(train_df: pd.DataFrame) -> CatBoostRegressor:
+    """Train the global CatBoost MAE regressor on game_total.
+
+    Args:
+        train_df: Training rows (rows without TARGET are dropped).
+
+    Returns:
+        A fitted ``CatBoostRegressor`` using ``settings.model`` hyperparameters.
+    """
     train_df = train_df.dropna(subset=[TARGET])
     X_tr, y_tr = get_xy(train_df)
     cfg = settings.model

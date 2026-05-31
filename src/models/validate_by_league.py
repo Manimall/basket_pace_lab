@@ -44,6 +44,7 @@ _FEAT_IMP_BAR_WIDTH: int = 25
 
 
 def main() -> None:
+    """Run per-league cross-validation and log the results + importance table."""
     log.info("Loading data from DB…")
     matches, qs = asyncio.run(load_data())
     log.info("  Matches: %d  |  QuarterStats rows: %d", len(matches), len(qs))

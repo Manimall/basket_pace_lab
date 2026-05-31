@@ -15,6 +15,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import random
@@ -55,6 +56,7 @@ class FlashscoreEnricher(BaseCollector):
         self._dry_run      = dry_run
 
     async def run(self) -> None:
+        """Enrich DB matches with Flashscore quarter scores for the targets."""
         await ensure_flashscore_id_column(self._sf)
         log.info("DB: %s:%s/%s", settings.db.host, settings.db.port, settings.db.name)
 
@@ -137,34 +139,25 @@ class FlashscoreEnricher(BaseCollector):
         await dispose_engine()
 
 
-def _parse_args() -> dict:
-    args = sys.argv[1:]
-    opts: dict = {"leagues": None, "seasons": None, "limit": None, "dry_run": False}
-    i = 0
-    while i < len(args):
-        if args[i] == "--leagues" and i + 1 < len(args):
-            vals, i = [], i + 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["leagues"] = vals
-        elif args[i] == "--seasons" and i + 1 < len(args):
-            vals, i = [], i + 1
-            while i < len(args) and not args[i].startswith("--"):
-                vals.append(args[i]); i += 1
-            opts["seasons"] = vals
-        elif args[i] == "--limit" and i + 1 < len(args):
-            opts["limit"] = int(args[i + 1]); i += 2
-        elif args[i] == "--dry-run":
-            opts["dry_run"] = True; i += 1
-        else:
-            i += 1
-    return opts
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI options for the Flashscore quarter-score enricher.
+
+    Returns:
+        Namespace with ``leagues`` / ``seasons`` (list[str] | None),
+        ``limit`` (int | None), and ``dry_run`` (bool).
+    """
+    p = argparse.ArgumentParser(description="Enrich matches with Flashscore quarter scores.")
+    p.add_argument("--leagues", nargs="+", default=None, help="League keys to enrich.")
+    p.add_argument("--seasons", nargs="+", default=None, help="Season codes to restrict to.")
+    p.add_argument("--limit", type=int, default=None, help="Max matches to process.")
+    p.add_argument("--dry-run", action="store_true", help="List targets, do not write.")
+    return p.parse_args()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", stream=sys.stdout)
-    opts = _parse_args()
+    args = _parse_args()
     FlashscoreEnricher(
-        leagues=opts["leagues"], season_codes=opts["seasons"],
-        limit=opts["limit"], dry_run=opts["dry_run"],
+        leagues=args.leagues, season_codes=args.seasons,
+        limit=args.limit, dry_run=args.dry_run,
     ).run_sync()

@@ -68,6 +68,7 @@ class DirectOddsEnricher(BaseCollector):
         self._dry_run = dry_run
 
     async def run(self) -> None:
+        """Scrape closing O/U lines via direct match URLs and persist them."""
         log.info("DB: %s:%s/%s", settings.db.host, settings.db.port, settings.db.name)
 
         targets = await load_odds_targets(

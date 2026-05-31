@@ -34,6 +34,15 @@ _STATUS_MAP = {
 
 
 async def api_get(page: Page, path: str) -> dict[str, Any] | None:
+    """GET a Sofascore API path via the Playwright page request.
+
+    Args:
+        page: Active Playwright page (carries the warmed-up session).
+        path: API path appended to the Sofascore v1 base URL.
+
+    Returns:
+        Parsed JSON dict, or None on non-OK status / network error.
+    """
     url = f"https://www.sofascore.com/api/v1{path}"
     try:
         resp = await page.request.get(url, headers=SOFASCORE_API_HEADERS, timeout=15_000)
@@ -47,6 +56,17 @@ async def api_get(page: Page, path: str) -> dict[str, Any] | None:
 async def fetch_event_ids(
     page: Page, tournament_id: int, season_id: int, max_pages: int = 50
 ) -> list[int]:
+    """Page through a season's event list and collect finished event ids.
+
+    Args:
+        page: Active Playwright page.
+        tournament_id: Sofascore unique-tournament id.
+        season_id: Sofascore season id.
+        max_pages: Hard cap on pages to request.
+
+    Returns:
+        List of finished-event ids (possibly empty).
+    """
     ids: list[int] = []
     for p in range(max_pages):
         data = await api_get(

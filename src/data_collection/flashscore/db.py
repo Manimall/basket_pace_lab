@@ -28,6 +28,14 @@ async def save_enriched(
     fs_id: str,
     quarter_rows: list[QuarterStatRow],
 ) -> None:
+    """Persist quarter scores and mark a match as quarter-broken-down.
+
+    Args:
+        db_session_factory: Async session factory.
+        match_id: Target match primary key.
+        fs_id: Flashscore id to store on the match.
+        quarter_rows: Quarter stat rows to insert.
+    """
     async with db_session_factory() as db:
         async with db.begin():
             await save_quarter_stats(db, match_id, quarter_rows)
@@ -47,6 +55,17 @@ async def load_db_matches(
     season_codes: list[str] | None,
     limit: int | None,
 ) -> list[DbMatch]:
+    """Load finished matches lacking a quarter breakdown, for enrichment.
+
+    Args:
+        db_session_factory: Async session factory.
+        leagues: Optional tournament_name whitelist.
+        season_codes: Optional season-code whitelist (mapped to LIKE patterns).
+        limit: Optional row cap.
+
+    Returns:
+        Matching ``DbMatch`` records ordered by scheduled_at DESC.
+    """
     conditions = ["m.has_quarter_breakdown = FALSE", "m.home_score_final IS NOT NULL"]
     params: dict = {}
 
@@ -96,6 +115,7 @@ async def load_db_matches(
 
 
 async def ensure_flashscore_id_column(db_session_factory: Any) -> None:
+    """Idempotently add the ``matches.flashscore_id`` column if it is missing."""
     async with db_session_factory() as db:
         async with db.begin():
             await db.execute(text(

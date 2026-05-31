@@ -69,11 +69,27 @@ _DROP_COLS = [
 
 
 def load_dataset() -> pd.DataFrame:
+    """Build and return the full feature dataset from the database.
+
+    Returns:
+        The feature-built match DataFrame produced by ``BasketballFeatureBuilder``.
+    """
     builder = BasketballFeatureBuilder()
     return builder.build()
 
 
 def prepare_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[str]]:
+    """Build the leakage-free feature matrix and target for the Q1-pace model.
+
+    Sorts chronologically, drops first-game rows lacking rolling history, and
+    removes all target/raw columns from X.
+
+    Args:
+        df: Feature-built dataset from ``load_dataset``.
+
+    Returns:
+        Tuple ``(X, y, feature_names)``.
+    """
     # Strict chronological order
     df = df.sort_values("scheduled_at").reset_index(drop=True)
 
@@ -100,6 +116,17 @@ class EvalMetrics:
 
 def train(X_tr: pd.DataFrame, y_tr: pd.Series,
           X_te: pd.DataFrame, y_te: pd.Series) -> CatBoostRegressor:
+    """Train the Q1-pace CatBoost regressor with early stopping.
+
+    Args:
+        X_tr: Training feature matrix.
+        y_tr: Training target (q1_avg_pace).
+        X_te: Eval feature matrix (for early stopping).
+        y_te: Eval target.
+
+    Returns:
+        The fitted ``CatBoostRegressor``.
+    """
     train_pool = Pool(X_tr, y_tr)
     eval_pool  = Pool(X_te, y_te)
 
@@ -122,6 +149,16 @@ def train(X_tr: pd.DataFrame, y_tr: pd.Series,
 
 def evaluate(model: CatBoostRegressor,
              X_te: pd.DataFrame, y_te: pd.Series) -> EvalMetrics:
+    """Score a trained model on the held-out set.
+
+    Args:
+        model: Fitted regressor.
+        X_te: Test feature matrix.
+        y_te: Test target.
+
+    Returns:
+        ``EvalMetrics`` with MAE, RMSE, and raw predictions.
+    """
     preds = model.predict(X_te)
     mae  = float(mean_absolute_error(y_te, preds))
     rmse = float(np.sqrt(mean_squared_error(y_te, preds)))
@@ -131,6 +168,16 @@ def evaluate(model: CatBoostRegressor,
 def feature_importance(model: CatBoostRegressor,
                        feature_names: list[str],
                        top_n: int = _FEAT_IMP_TOP_N) -> pd.DataFrame:
+    """Return the top-N features ranked by CatBoost importance.
+
+    Args:
+        model: Fitted regressor.
+        feature_names: Column names aligned with the model's feature order.
+        top_n: Number of rows to keep.
+
+    Returns:
+        DataFrame of ``(feature, importance)`` sorted descending.
+    """
     imp = model.get_feature_importance()
     return (
         pd.DataFrame({"feature": feature_names, "importance": imp})
@@ -141,6 +188,14 @@ def feature_importance(model: CatBoostRegressor,
 
 
 def save_model(model: CatBoostRegressor) -> Path:
+    """Persist the model to the package's .cbm file.
+
+    Args:
+        model: Fitted regressor to serialise.
+
+    Returns:
+        Path the model was written to.
+    """
     out = Path(__file__).parent / _MODEL_FILENAME
     model.save_model(str(out))
     return out
@@ -157,6 +212,7 @@ def _render_feature_importance(fi: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    """Train, evaluate, log feature importance, and save the Q1-pace model."""
     log.info("Loading dataset…")
     df = load_dataset()
     log.info("  Raw rows: %d", len(df))

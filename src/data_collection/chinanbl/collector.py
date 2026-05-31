@@ -97,6 +97,7 @@ class ChinaNBLCollector(BaseCollector):
         self._fetch_stats = fetch_stats
 
     async def run(self) -> None:
+        """Scrape ChinaNBL events for the configured seasons and persist them."""
         async with async_playwright() as pw:
             browser: Browser = await pw.chromium.launch(headless=True)
             ctx: BrowserContext = await browser.new_context(

@@ -24,6 +24,7 @@ async def check_db_connection() -> str:
 
 
 async def main() -> None:
+    """Application entry point: init tables and run the DB health-check."""
     log.info("Starting basket_pace_lab …")
     log.info("DB host: %s:%s / db: %s", settings.db.host, settings.db.port, settings.db.name)
 
