@@ -1,0 +1,65 @@
+name: CI
+
+# Run the full test matrix on every push to main and on every PR targeting main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Python: ML / Data-Engineering layer ────────────────────────────────────
+  python-tests:
+    name: Python tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned to 3.11 to match the deployment image (Dockerfile: python:3.11-slim)
+      # and the documented "Python 3.11+" baseline in the README.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Unit tests are I/O-free (no Postgres, no browser): pydantic-settings falls
+      # back to defaults when .env is absent, so no DB service or env vars needed.
+      - name: Run pytest
+        run: pytest -q
+
+  # ── Go: etl_scout data-collection microservice ─────────────────────────────
+  go-tests:
+    name: Go tests (go test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/etl_scout
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Read the Go version straight from go.mod (single source of truth) and
+      # enable built-in module caching keyed on the module's go.sum.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src/etl_scout/go.mod
+          cache-dependency-path: src/etl_scout/go.sum
+
+      - name: Run go test
+        run: go test -v ./...
