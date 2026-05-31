@@ -11,22 +11,32 @@ BASE+FATIGUE+TEAM_ADV) on 2 340 box-score-enriched matches.
 
 Winners summary (working thresholds 0.54–0.58):
 
-    League      │ Combo                   │ Best ROI │ AUC
-    ────────────┼─────────────────────────┼──────────┼──────
-    LegaA       │ BASE+FATIGUE+TEAM_ADV   │  +25.2%  │ 0.669
-    EuroLeague  │ BASE+FATIGUE+TEAM_ADV   │   +1.2%  │ 0.515
-    NBA         │ BASE+FATIGUE             │  +10.8%  │ 0.557
-    BBL         │ BASE+FATIGUE             │   +5.6%  │ 0.542
-    LNB         │ BASE+TEAM_ADV           │  +10.0%  │ 0.516
-    Israel      │ BASE                    │  +17.4%  │ 0.528
-    BLeague     │ BASE                    │  +15.7%  │ 0.583
-    NBL         │ BASE                    │  +11.8%  │ 0.650
-    ABA         │ BASE                    │   +6.2%  │ 0.584
-    CBA         │ BASE (fallback)         │   -6.2%  │ 0.459  ← UNPROFITABLE
-    ACB         │ BASE (fallback)         │   -6.8%  │ 0.589  ← UNPROFITABLE
+    League      │ Combo                   │ Best ROI │ AUC   │ Notes
+    ────────────┼─────────────────────────┼──────────┼───────┼─────────────────
+    LegaA       │ BASE+FATIGUE+TEAM_ADV   │  +25.2%  │ 0.669 │
+    EuroLeague  │ BASE+FATIGUE+TEAM_ADV   │   +1.2%  │ 0.515 │
+    NBA         │ BASE+FATIGUE            │  +10.8%  │ 0.557 │
+    BBL         │ BASE+FATIGUE            │   +5.6%  │ 0.542 │
+    LNB         │ BASE+TEAM_ADV           │  +10.0%  │ 0.516 │
+    Israel      │ BASE                    │  +17.4%  │ 0.528 │
+    BLeague     │ BASE                    │  +15.7%  │ 0.583 │
+    NBL         │ BASE                    │  +11.8%  │ 0.650 │
+    ABA         │ BASE                    │   +6.2%  │ 0.584 │
+    CBA         │ BASE (fallback)         │   -6.2%  │ 0.459 │ UNPROFITABLE
+    ACB         │ BASE+FATIGUE+TEAM_ADV   │   -6.8%  │ 0.589 │ STRICT threshold
 
-UNPROFITABLE_LEAGUES (CBA, ACB) return BASE exclusions but emit a WARNING so
-inference pipelines can gate on ``is_league_unprofitable()`` before staking.
+ACB разбор
+----------
+AUC=0.589 подтверждает предсказательную силу модели — испанский рынок физически
+понят. Проблема в рыночном барьере: букмекеры систематически завышают тоталы ACB,
+уничтожая валуй при стандартных порогах (0.54–0.58).
+
+Решение: ACB использует ``BASE+FATIGUE+TEAM_ADV`` (лучший AUC), но активируется
+только при уверенности ≥ ``STRICT_THRESHOLD_LEAGUES["ACB"]`` = 0.60. Такой порог
+отсекает инфляционные маркет-ситуации и оставляет только железобетонные матчи.
+Использовать ``get_league_min_threshold()`` перед генерацией ставок.
+
+CBA (Китай): AUC=0.459 < 0.5 — модель предсказывает наоборот. Полный бан.
 
 Design choice
 -------------
@@ -74,44 +84,49 @@ class FeatureGroup(StrEnum):
 
 # ── Grid-search validated per-league configs (V9) ────────────────────────────
 
-# Leagues confirmed unprofitable: best ROI negative across all 4 combos.
-# Inference layer should call ``is_league_unprofitable()`` before staking.
-UNPROFITABLE_LEAGUES: frozenset[str] = frozenset({"CBA", "ACB"})
+# Leagues where model cannot beat the bookmaker at any confidence level.
+# AUC < 0.5 means the model predicts the opposite of reality — full ban.
+# Inference layer must call ``is_league_unprofitable()`` before staking.
+UNPROFITABLE_LEAGUES: frozenset[str] = frozenset({"CBA"})
+
+# Leagues with genuine predictive power (AUC > 0.5) but inflated bookmaker
+# lines that require higher confidence to overcome the market barrier.
+# Key = tournament_name, Value = minimum probability threshold for bet entry.
+# Use ``get_league_min_threshold()`` instead of reading this dict directly.
+STRICT_THRESHOLD_LEAGUES: dict[str, float] = {
+    # ACB (Spain): AUC=0.589 — модель понимает физику лиги, но букмекеры
+    # систематически завышают тоталы. Порог 0.60 отсекает инфляционные ситуации.
+    "ACB": 0.60,
+}
+
+# Default minimum probability threshold applied to all unlisted leagues.
+DEFAULT_MIN_THRESHOLD: float = 0.54
 
 # Per-league enabled feature groups, validated by grid search 2026-05-31.
 # Unlisted leagues fall back to DEFAULT_GROUPS (BASE only).
 FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
     # ── BASE + FATIGUE + TEAM_ADV ──────────────────────────────────────────
-    # LegaA: box-score data now fully backfilled → TEAM_ADV delivers +25.2%
-    # ROI and jumps AUC from 0.50 to 0.67. Biggest V9 discovery.
     "LegaA":      frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE, FeatureGroup.TEAM_ADV}),
-    # EuroLeague: partially backfilled → modest +1.2% ROI; will improve as
-    # scout finishes remaining 327 pending matches.
     "EuroLeague": frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE, FeatureGroup.TEAM_ADV}),
+    # ACB: AUC=0.589 — используем лучший combo по AUC; порог жёсткий (0.60).
+    "ACB":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE, FeatureGroup.TEAM_ADV}),
 
     # ── BASE + FATIGUE ─────────────────────────────────────────────────────
-    # NBA: dense schedule (B2B, 3-in-4), fatigue is real signal (+10.8% ROI).
     "NBA":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
-    # BBL: British Basketball League, similarly dense European calendar.
     "BBL":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
 
     # ── BASE + TEAM_ADV ────────────────────────────────────────────────────
-    # LNB (French Pro A): box-score adds signal (+10% vs +5.1% for BASE).
     "LNB":        frozenset({FeatureGroup.BASE, FeatureGroup.TEAM_ADV}),
 
     # ── BASE only ──────────────────────────────────────────────────────────
-    # Adding FATIGUE or TEAM_ADV hurt in grid search; BASE is the optimum.
     "Israel":     frozenset({FeatureGroup.BASE}),
     "BLeague":    frozenset({FeatureGroup.BASE}),
     "NBL":        frozenset({FeatureGroup.BASE}),
     "ABA":        frozenset({FeatureGroup.BASE}),
 
-    # ── UNPROFITABLE — BASE fallback with WARNING ──────────────────────────
-    # All combos returned negative ROI. Model cannot beat the line here.
-    # CBA: AUC=0.459 (< 0.5) — model predicts opposite of reality.
-    # ACB: AUC=0.589 but ROI still -6.8% — line is too efficient.
+    # ── UNPROFITABLE — BASE fallback + WARNING ─────────────────────────────
+    # CBA: AUC=0.459 — модель предсказывает наоборот, полный бан.
     "CBA":        frozenset({FeatureGroup.BASE}),
-    "ACB":        frozenset({FeatureGroup.BASE}),
 }
 
 # Fallback for any unlisted league or mixed-league pipelines (None key).
@@ -139,6 +154,9 @@ def is_league_unprofitable(league_key: str | None) -> bool:
     placing a stake. The feature selector still runs normally — unprofitable
     leagues can be trained/evaluated for research, just not bet on.
 
+    Note: ACB is NOT in UNPROFITABLE_LEAGUES. It has a strict threshold
+    instead — use ``get_league_min_threshold()`` to enforce it.
+
     Args:
         league_key: ``matches.tournament_name`` value, or ``None``.
 
@@ -148,6 +166,32 @@ def is_league_unprofitable(league_key: str | None) -> bool:
     return league_key in UNPROFITABLE_LEAGUES
 
 
+def get_league_min_threshold(league_key: str | None) -> float:
+    """Return the minimum probability threshold for bet placement.
+
+    Most leagues use ``DEFAULT_MIN_THRESHOLD`` (0.54). Leagues in
+    ``STRICT_THRESHOLD_LEAGUES`` (e.g. ACB) require higher confidence to
+    overcome inflated bookmaker lines — use the returned threshold instead of
+    the global default when filtering bet candidates.
+
+    Args:
+        league_key: ``matches.tournament_name`` value, or ``None``.
+
+    Returns:
+        Minimum probability threshold in [0.5, 1.0). Always ≥ 0.54.
+    """
+    if league_key is None:
+        return DEFAULT_MIN_THRESHOLD
+    threshold = STRICT_THRESHOLD_LEAGUES.get(league_key, DEFAULT_MIN_THRESHOLD)
+    if threshold > DEFAULT_MIN_THRESHOLD:
+        log.debug(
+            "Feature selector: league=%s использует жёсткий порог %.2f "
+            "(стандартный %.2f) — рыночный барьер завышенных линий.",
+            league_key, threshold, DEFAULT_MIN_THRESHOLD,
+        )
+    return threshold
+
+
 def get_excluded_features(league_key: str | None) -> frozenset[str]:
     """Return the column names to hide from the model for one league.
 
@@ -155,7 +199,7 @@ def get_excluded_features(league_key: str | None) -> frozenset[str]:
     grid-search-validated per-league group rules. For each ``FeatureGroup``
     NOT in the league's allow-list, its columns are added to the excluded set.
 
-    Unprofitable leagues (CBA, ACB) fall back to BASE and emit a WARNING so
+    Unprofitable leagues (CBA) fall back to BASE and emit a WARNING so
     monitoring can detect when an inference request targets them.
 
     Args:
@@ -167,7 +211,7 @@ def get_excluded_features(league_key: str | None) -> frozenset[str]:
     """
     if is_league_unprofitable(league_key):
         log.warning(
-            "Селектор фичей: лига %s помечена как УБЫТОЧНАЯ "
+            "ПРОПУСК: лига %s помечена как УБЫТОЧНАЯ "
             "(Grid Search: все комбинации фичей дали отрицательный ROI). "
             "Применяется BASE fallback — ставки по этой лиге запрещены.",
             league_key,

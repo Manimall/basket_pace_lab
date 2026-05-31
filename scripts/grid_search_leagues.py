@@ -3,10 +3,17 @@
 
 Loads the full current-season dataset once, then runs the standard
 CatBoost classifier pipeline for every (league, combo) cell and
-reports LogLoss / ROC-AUC / ROI at working thresholds (0.54–0.58).
+reports LogLoss / ROC-AUC / ROI at working thresholds.
 
-The output shows which feature combination yields the best ROI signal
-for each league — feed the winners into feature_selector.py.
+Three target periods are supported via ``--period``:
+
+    game (default)  — полный тотал матча vs. закрывающая линия букмекера
+    1q              — тотал 1-й четверти vs. синтетическая медиана (нет линий)
+    1h              — тотал 1-й половины  vs. синтетическая медиана (нет линий)
+
+Для 1Q и 1H реальных линий букмекеров в базе нет, поэтому ROI считается
+относительно медианы тренировочной выборки (метрика качества модели,
+а не реального ROI на рынке).
 
 Feature combos tested (BASE is always on):
     BASE                — rolling stats, matchup, context (V6 baseline)
@@ -17,8 +24,9 @@ Feature combos tested (BASE is always on):
 Usage:
     cd /path/to/basket_pace_lab
     python scripts/grid_search_leagues.py
-    python scripts/grid_search_leagues.py --leagues EuroLeague NBA
-    python scripts/grid_search_leagues.py --csv results/grid_$(date +%F).csv
+    python scripts/grid_search_leagues.py --period 1q --csv results/grid_search_1q.csv
+    python scripts/grid_search_leagues.py --period 1h --csv results/grid_search_1h.csv
+    python scripts/grid_search_leagues.py --leagues EuroLeague NBA --period game
     python scripts/grid_search_leagues.py --min-bets 15 --csv out.csv
 """
 from __future__ import annotations
@@ -27,15 +35,15 @@ import argparse
 import asyncio
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.metrics import log_loss, roc_auc_score
 
-# Add project root so `src.*` imports resolve when running from any directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import settings
@@ -52,6 +60,47 @@ from src.models.evaluation import chrono_split
 logging.basicConfig(level="INFO", format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+# ── Period configuration ──────────────────────────────────────────────────────
+
+Period = Literal["game", "1q", "1h"]
+
+
+@dataclass(frozen=True)
+class PeriodConfig:
+    """Configuration for one target period.
+
+    Attributes:
+        period:     Identifier passed via --period flag.
+        target_col: Column name of the raw score total to predict.
+        label:      Human-readable label for table headers.
+        has_real_line: True only for "game" where bookmaker_total_closing exists.
+    """
+    period:        Period
+    target_col:    str
+    label:         str
+    has_real_line: bool
+
+
+_PERIOD_CONFIGS: dict[Period, PeriodConfig] = {
+    "game": PeriodConfig(
+        period        = "game",
+        target_col    = "game_total",
+        label         = "GAME TOTAL",
+        has_real_line = True,
+    ),
+    "1q": PeriodConfig(
+        period        = "1q",
+        target_col    = "q1_total",
+        label         = "1-я ЧЕТВЕРТЬ",
+        has_real_line = False,
+    ),
+    "1h": PeriodConfig(
+        period        = "1h",
+        target_col    = "h1_total",
+        label         = "1-я ПОЛОВИНА",
+        has_real_line = False,
+    ),
+}
 
 # ── Grid definition ───────────────────────────────────────────────────────────
 
@@ -64,18 +113,13 @@ COMBOS: dict[str, frozenset[FeatureGroup]] = {
     }),
 }
 
-# Thresholds to evaluate — the "working" confidence range.
 GRID_THRESHOLDS: tuple[float, ...] = (0.54, 0.56, 0.58)
 
 
-# ── Feature helpers (bypass FEATURES_BY_LEAGUE for the grid) ─────────────────
+# ── Feature helpers ───────────────────────────────────────────────────────────
 
 def _excluded_for_combo(enabled: frozenset[FeatureGroup]) -> frozenset[str]:
-    """Build exclusion set for a given enabled-group frozenset.
-
-    Mirrors feature_selector.get_excluded_features but takes the enabled set
-    directly instead of a league key — lets the grid override the lookup table.
-    """
+    """Build exclusion set for a given enabled-group frozenset."""
     excluded: frozenset[str] = _ALWAYS_EXCLUDED
     for group, cols in _GROUP_COLUMNS.items():
         if group not in enabled:
@@ -93,28 +137,55 @@ def _get_x(df: pd.DataFrame, excluded: frozenset[str]) -> pd.DataFrame:
 
 # ── Dataset preparation ───────────────────────────────────────────────────────
 
-def prepare_dataset() -> pd.DataFrame:
-    """Load + feature-build once; derive binary target. Mirrors backtester."""
-    log.info("Loading matches + quarter_stats from DB…")
+def prepare_dataset(period: Period) -> pd.DataFrame:
+    """Load + feature-build; derive binary target for the given period.
+
+    For "game": uses bookmaker_total_closing as the line (real market).
+    For "1q"/"1h": the binary target is derived inside run_cell from the
+    training-set median — the raw scores are returned without BIN_TARGET
+    so each cell can compute a leak-free per-league median.
+
+    Args:
+        period: Target period — "game", "1q", or "1h".
+
+    Returns:
+        DataFrame with feature columns + period target column populated.
+        BIN_TARGET is set only for "game"; absent for "1q"/"1h".
+    """
+    cfg = _PERIOD_CONFIGS[period]
+    log.info("Загрузка матчей + quarter_stats из БД…")
     matches, qs = asyncio.run(load_data())
 
-    log.info("Building features…")
-    df = build_features(matches, qs).dropna(subset=[TARGET]).reset_index(drop=True)
-    log.info("  Rows after feature build: %d", len(df))
+    log.info("Построение фичей…")
+    df = build_features(matches, qs)
 
+    # Drop rows where period target is missing
     before = len(df)
-    df = df.dropna(subset=[LINE_COL]).reset_index(drop=True)
-    log.info("  Dropped %d rows without closing line → %d remain",
-             before - len(df), len(df))
+    df = df.dropna(subset=[cfg.target_col]).reset_index(drop=True)
+    if len(df) < before:
+        log.info("  Удалено %d строк без %s", before - len(df), cfg.target_col)
+    log.info("  Строк после фильтрации: %d", len(df))
 
-    pushes = int((df[TARGET] == df[LINE_COL]).sum())
-    if pushes:
-        log.info("  Dropping %d push rows (game_total == line)", pushes)
-        df = df[df[TARGET] != df[LINE_COL]].reset_index(drop=True)
+    if period == "game":
+        # Game period: use real bookmaker line, drop rows without it
+        df = df.dropna(subset=[LINE_COL]).reset_index(drop=True)
+        pushes = int((df[cfg.target_col] == df[LINE_COL]).sum())
+        if pushes:
+            log.info("  Удаляю %d push-строк (game_total == line)", pushes)
+            df = df[df[cfg.target_col] != df[LINE_COL]].reset_index(drop=True)
+        df[BIN_TARGET] = (df[cfg.target_col] > df[LINE_COL]).astype(int)
+        log.info(
+            "  OVER rate: %.2f%%  (линия: %s)",
+            100.0 * df[BIN_TARGET].mean(), LINE_COL,
+        )
+    else:
+        # Sub-game periods: no real line — BIN_TARGET derived per cell from median
+        log.info(
+            "  Период '%s': нет реальных линий букмекеров. "
+            "ROI считается относительно медианы тренировочного сета.",
+            period,
+        )
 
-    df[BIN_TARGET] = (df[TARGET] > df[LINE_COL]).astype(int)
-    log.info("  Binary target set. Overall OVER rate: %.2f%%",
-             100.0 * df[BIN_TARGET].mean())
     return df
 
 
@@ -124,11 +195,7 @@ def _best_roi_from_reports(
     reports: list[BetReport],
     min_bets: int,
 ) -> tuple[float, str, int]:
-    """Return (best_roi %, threshold_str, n_bets) for the best working threshold.
-
-    A threshold qualifies only when it has at least min_bets placed bets.
-    Returns (nan, '—', 0) when no threshold qualifies.
-    """
+    """Return (best_roi %, threshold_str, n_bets) for the best qualifying threshold."""
     best_roi  = float("nan")
     best_thr  = "—"
     best_bets = 0
@@ -139,61 +206,108 @@ def _best_roi_from_reports(
             best_roi  = r.roi
             best_thr  = r.row_label
             best_bets = r.n
-    return round(best_roi, 2) if not np.isnan(best_roi) else best_roi, best_thr, best_bets
+    return (round(best_roi, 2) if not np.isnan(best_roi) else best_roi), best_thr, best_bets
+
+
+def _derive_bin_target_from_median(
+    train_df: pd.DataFrame,
+    test_df:  pd.DataFrame,
+    target_col: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+    """Create binary over/under target based on training-set median.
+
+    Uses training median as the synthetic line — prevents look-ahead leakage.
+    Returns updated train_df, test_df, and the median value used as the line.
+    """
+    median_val = float(train_df[target_col].median())
+    for df_ref, df_out in [(train_df, train_df), (test_df, test_df)]:
+        df_out = df_out.copy()
+        df_out[BIN_TARGET] = (df_out[target_col] > median_val).astype(int)
+        df_out[LINE_COL]   = median_val
+    # Re-assign with copies
+    train_df = train_df.copy()
+    test_df  = test_df.copy()
+    train_df[BIN_TARGET] = (train_df[target_col] > median_val).astype(int)
+    train_df[LINE_COL]   = median_val
+    test_df[BIN_TARGET]  = (test_df[target_col] > median_val).astype(int)
+    test_df[LINE_COL]    = median_val
+    return train_df, test_df, median_val
 
 
 def run_cell(
     train_df: pd.DataFrame,
-    test_df: pd.DataFrame,
-    enabled: frozenset[FeatureGroup],
-    params: SimulationParams,
+    test_df:  pd.DataFrame,
+    enabled:  frozenset[FeatureGroup],
+    params:   SimulationParams,
     min_bets: int,
+    period:   Period,
 ) -> dict[str, Any] | None:
-    """Train + evaluate one (league, combo) cell.
+    """Train + evaluate one (league, combo) cell for the given period.
 
-    Takes pre-split train/test DataFrames (caller computes the split once per
-    league, not once per combo). Returns a metrics dict or None when skipped.
+    Args:
+        train_df: Training split (pre-split by caller for efficiency).
+        test_df:  Test split.
+        enabled:  Feature groups enabled for this combo.
+        params:   Simulation knobs (odds, stake, thresholds, bootstrap).
+        min_bets: Minimum bets at threshold to treat ROI as reliable.
+        period:   Target period — affects binary target derivation.
+
+    Returns:
+        Metrics dict, or None when the cell is skipped.
     """
     guards = settings.evaluation
     if len(train_df) < guards.min_train_rows or len(test_df) < guards.min_test_rows:
         log.warning(
-            "  Skipped: train=%d (min %d) / test=%d (min %d)",
+            "  Пропуск: train=%d (min %d) / test=%d (min %d)",
             len(train_df), guards.min_train_rows,
             len(test_df),  guards.min_test_rows,
         )
         return None
 
     try:
+        cfg = _PERIOD_CONFIGS[period]
+
+        # For sub-game periods: compute synthetic line from training set
+        synthetic_line: float | None = None
+        if not cfg.has_real_line:
+            if train_df[cfg.target_col].isna().all():
+                log.warning("  Пропуск: все значения %s — NaN.", cfg.target_col)
+                return None
+            train_df, test_df, synthetic_line = _derive_bin_target_from_median(
+                train_df, test_df, cfg.target_col
+            )
+
+        # Guard: single-class target
+        if BIN_TARGET not in train_df.columns or len(train_df[BIN_TARGET].unique()) < 2:
+            log.warning("  Пропуск: целевая переменная однородна (один класс).")
+            return None
+
         excluded = _excluded_for_combo(enabled)
         X_tr = _get_x(train_df, excluded)
         X_te = _get_x(test_df,  excluded)
 
         if X_tr.empty or X_te.empty or X_tr.shape[1] == 0:
-            log.warning("  Skipped: empty feature matrix after exclusion.")
+            log.warning("  Пропуск: пустая матрица фичей после исключений.")
             return None
 
         y_tr = train_df[BIN_TARGET].astype(int).to_numpy()
 
-        if len(np.unique(y_tr)) < 2:
-            log.warning("  Skipped: training labels are single-class.")
-            return None
-
-        cfg = settings.model
+        model_cfg = settings.model
         model = CatBoostClassifier(
-            iterations    = cfg.catboost_iterations,
-            learning_rate = cfg.catboost_lr,
-            depth         = cfg.catboost_depth,
+            iterations    = model_cfg.catboost_iterations,
+            learning_rate = model_cfg.catboost_lr,
+            depth         = model_cfg.catboost_depth,
             loss_function = "Logloss",
             eval_metric   = "AUC",
             cat_features  = CAT_COLS,
-            random_seed   = cfg.catboost_seed,
+            random_seed   = model_cfg.catboost_seed,
             verbose       = 0,
         )
         model.fit(X_tr, y_tr)
 
         probs   = model.predict_proba(X_te)[:, 1]
         y_te    = test_df[BIN_TARGET].astype(int).to_numpy()
-        actuals = test_df[TARGET].to_numpy()
+        actuals = test_df[cfg.target_col].to_numpy()
         lines   = test_df[LINE_COL].to_numpy()
 
         ll  = log_loss(y_te, probs, labels=[0, 1])
@@ -202,12 +316,15 @@ def run_cell(
         reports = run_threshold_sweep(probs, actuals, lines, params)
 
         result: dict[str, Any] = {
-            "n_train":    len(train_df),
-            "n_test":     len(test_df),
-            "n_features": X_tr.shape[1],
-            "log_loss":   round(ll, 4),
-            "roc_auc":    round(auc, 4),
+            "n_train":        len(train_df),
+            "n_test":         len(test_df),
+            "n_features":     X_tr.shape[1],
+            "log_loss":       round(ll, 4),
+            "roc_auc":        round(auc, 4),
         }
+        if synthetic_line is not None:
+            result["synthetic_line"] = round(synthetic_line, 2)
+
         for r in reports:
             result[f"roi_{r.row_label}"]  = round(r.roi, 2) if r.n >= min_bets else float("nan")
             result[f"bets_{r.row_label}"] = r.n
@@ -219,7 +336,7 @@ def run_cell(
         return result
 
     except Exception as exc:
-        log.error("  Cell failed with exception: %s", exc, exc_info=True)
+        log.error("  Ячейка завершилась с ошибкой: %s", exc, exc_info=True)
         return None
 
 
@@ -236,7 +353,7 @@ def _print_table(df: pd.DataFrame, title: str) -> None:
     print()
 
 
-def _build_full_table(records: list[dict[str, Any]]) -> pd.DataFrame:
+def _build_full_table(records: list[dict[str, Any]], period: Period) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
     df = pd.DataFrame(records)
@@ -244,13 +361,10 @@ def _build_full_table(records: list[dict[str, Any]]) -> pd.DataFrame:
     for t in GRID_THRESHOLDS:
         ts = f"{t:.2f}"
         thr_cols += [f"roi_{ts}", f"bets_{ts}"]
-    cols = [
-        "league", "combo",
-        "n_train", "n_test", "n_features",
-        "log_loss", "roc_auc",
-        *thr_cols,
-        "best_roi", "best_thr", "best_bets",
-    ]
+    base_cols = ["league", "combo", "n_train", "n_test", "n_features", "log_loss", "roc_auc"]
+    if period != "game" and "synthetic_line" in df.columns:
+        base_cols.append("synthetic_line")
+    cols = base_cols + thr_cols + ["best_roi", "best_thr", "best_bets"]
     cols = [c for c in cols if c in df.columns]
     return df[cols].sort_values(["league", "combo"]).reset_index(drop=True)
 
@@ -269,10 +383,7 @@ def _build_winner_table(full: pd.DataFrame) -> pd.DataFrame:
                 "log_loss": float("nan"), "roc_auc": float("nan"),
             })
             continue
-        # Tie-break: highest best_roi first, then most bets (better-sampled combo wins).
-        idx = viable.sort_values(
-            ["best_roi", "best_bets"], ascending=False
-        ).index[0]
+        idx  = viable.sort_values(["best_roi", "best_bets"], ascending=False).index[0]
         best = viable.loc[idx]
         rows.append({
             "league":       league,
@@ -298,38 +409,50 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
+        "--period", choices=["game", "1q", "1h"], default="game",
+        help=(
+            "Целевой период: 'game' — полный тотал (по умолчанию), "
+            "'1q' — 1-я четверть, '1h' — 1-я половина"
+        ),
+    )
+    p.add_argument(
         "--leagues", nargs="*", metavar="LEAGUE", default=None,
-        help="Leagues to include (default: all in dataset). E.g. --leagues EuroLeague NBA",
+        help="Лиги для прогона (по умолчанию — все). Пример: --leagues EuroLeague NBA",
     )
     p.add_argument(
         "--csv", default="", metavar="PATH",
-        help="Save full grid results to this CSV (optional)",
+        help="Путь для сохранения полных результатов в CSV (опционально)",
     )
     p.add_argument(
         "--min-bets", type=int, default=10, metavar="N",
-        help="Min bets at a threshold to treat its ROI as reliable (default: 10)",
+        help="Минимальное число ставок на пороге для учёта ROI (по умолчанию: 10)",
     )
     return p.parse_args()
 
 
+def _default_csv(period: Period) -> str:
+    return f"results/grid_search_{period}.csv"
+
+
 def main() -> None:
     args = parse_args()
+    period: Period = args.period
+    period_cfg = _PERIOD_CONFIGS[period]
 
-    df = prepare_dataset()
+    df = prepare_dataset(period)
 
     all_leagues: list[str] = sorted(df["league"].dropna().unique().tolist())
     if args.leagues:
         unknown = [lg for lg in args.leagues if lg not in all_leagues]
         if unknown:
-            log.warning("Unknown leagues (not in dataset): %s", unknown)
+            log.warning("Лиги не найдены в датасете: %s", unknown)
         leagues: list[str] = [lg for lg in args.leagues if lg in all_leagues]
         if not leagues:
-            log.error("None of the requested leagues found in the dataset. Available: %s",
-                      all_leagues)
+            log.error("Ни одна из запрошенных лиг не найдена. Доступные: %s", all_leagues)
             sys.exit(1)
     else:
         leagues = all_leagues
-    log.info("Running grid for %d league(s): %s", len(leagues), leagues)
+    log.info("Период: %s  |  Лиги: %d  |  Комбо: %d", period_cfg.label, len(leagues), len(COMBOS))
 
     params = SimulationParams(
         odds            = settings.evaluation.odds,
@@ -346,52 +469,59 @@ def main() -> None:
 
     for league in leagues:
         subset = df[df["league"] == league].reset_index(drop=True)
-        log.info("── League: %-20s  rows: %d", league, len(subset))
+        log.info("── Лига: %-20s  строк: %d", league, len(subset))
 
         if subset.empty:
-            log.warning("  No data for league '%s' — skipping.", league)
+            log.warning("  Нет данных для лиги '%s' — пропуск.", league)
             continue
 
-        # Split once per league; reuse across all 4 combos (efficiency).
+        # Split once per league; reuse across all combos (efficiency).
         train_df, test_dict = chrono_split(subset)
         test_df = pd.concat(test_dict.values(), ignore_index=True)
 
         for combo_name, enabled in COMBOS.items():
             done += 1
             log.info("  [%d/%d] %s × %s", done, total, league, combo_name)
-            cell = run_cell(train_df, test_df, enabled, params, args.min_bets)
+            cell = run_cell(train_df, test_df, enabled, params, args.min_bets, period)
             if cell is None:
-                log.info("  → skipped")
+                log.info("  → пропущено")
                 continue
             cell["league"] = league
             cell["combo"]  = combo_name
             records.append(cell)
             log.info(
-                "  → LogLoss=%.4f  AUC=%.4f  best_roi=%+.2f%% @ thr=%s (%d bets)",
+                "  → LogLoss=%.4f  AUC=%.4f  best_roi=%+.2f%% @ thr=%s (%d ставок)",
                 cell["log_loss"], cell["roc_auc"],
                 cell["best_roi"] if not np.isnan(cell["best_roi"]) else 0.0,
                 cell["best_thr"], cell["best_bets"],
             )
 
     if not records:
-        log.error("No cells produced results — check DB data and min_rows settings.")
+        log.error("Ни одна ячейка не дала результатов — проверьте данные и min_rows.")
         sys.exit(1)
 
-    full_df   = _build_full_table(records)
+    full_df   = _build_full_table(records, period)
     winner_df = _build_winner_table(full_df)
 
-    _print_table(full_df, "FULL GRID — all (league × combo) cells")
+    period_note = (
+        "" if period_cfg.has_real_line
+        else f" (ROI vs. синтетическая медиана, не реальная букмекерская линия)"
+    )
+    _print_table(
+        full_df,
+        f"ПОЛНАЯ ТАБЛИЦА — все (лига × комбо)  [{period_cfg.label}{period_note}]",
+    )
     _print_table(
         winner_df,
-        "WINNER SUMMARY — best combo per league "
-        "(→ paste into feature_selector.py FEATURES_BY_LEAGUE)",
+        f"ПОБЕДИТЕЛИ ПО ЛИГАМ [{period_cfg.label}]"
+        " (→ вставить в feature_selector.py)",
     )
 
-    if args.csv:
-        out = Path(args.csv)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        full_df.to_csv(out, index=False)
-        log.info("Full grid saved → %s", out)
+    csv_path = args.csv or _default_csv(period)
+    out = Path(csv_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    full_df.to_csv(out, index=False)
+    log.info("Результаты сохранены → %s", out)
 
 
 if __name__ == "__main__":
