@@ -44,6 +44,8 @@ _NAME_ALIASES: dict[str, str] = {
     "zhejiang golden bulls":     "zhejiang guangsha",
     # LNBP: team renamed Plateros de Fresnillo → Gambusinos (Flashscore uses new name)
     "plateros de fresnillo":     "gambusinos",
+    # LegaA: Sofascore uses sponsor+city, Flashscore uses city/nickname
+    "unahotels reggio emilia":   "reggiana",
 }
 
 # Applied before _STOP — expand abbreviated city prefixes used by Flashscore NBA

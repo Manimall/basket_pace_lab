@@ -1,20 +1,48 @@
 """Per-league feature-selection strategy.
 
-Different leagues have different schedule density patterns. Fatigue features
-(B2B, density windows, road streak, rest_diff) provide strong signal in
-densely-scheduled NBA but degenerate to noise in sparsely-scheduled European
-leagues (documented in ``docs/postmortem_v1_v6.md`` V7 section).
+This module is the single source of truth for "which feature groups should
+the model see for league X?" — both training and inference layers read here.
 
-This module owns the single source of truth that answers the question
-"which columns should the model see for league X?" — both training and
-inference layers read from here.
+V9 Grid-Search Sprint (2026-05-31)
+-----------------------------------
+Per-league configs validated empirically by ``scripts/grid_search_leagues.py``
+across 4 feature combos (BASE / BASE+FATIGUE / BASE+TEAM_ADV /
+BASE+FATIGUE+TEAM_ADV) on 2 340 box-score-enriched matches.
+
+Winners summary (working thresholds 0.54–0.58):
+
+    League      │ Combo                   │ Best ROI │ AUC   │ Notes
+    ────────────┼─────────────────────────┼──────────┼───────┼─────────────────
+    LegaA       │ BASE+FATIGUE+TEAM_ADV   │  +25.2%  │ 0.669 │
+    EuroLeague  │ BASE+FATIGUE+TEAM_ADV   │   +1.2%  │ 0.515 │
+    NBA         │ BASE+FATIGUE            │  +10.8%  │ 0.557 │
+    BBL         │ BASE+FATIGUE            │   +5.6%  │ 0.542 │
+    LNB         │ BASE+TEAM_ADV           │  +10.0%  │ 0.516 │
+    Israel      │ BASE                    │  +17.4%  │ 0.528 │
+    BLeague     │ BASE                    │  +15.7%  │ 0.583 │
+    NBL         │ BASE                    │  +11.8%  │ 0.650 │
+    ABA         │ BASE                    │   +6.2%  │ 0.584 │
+    CBA         │ BASE (fallback)         │   -6.2%  │ 0.459 │ UNPROFITABLE
+    ACB         │ BASE+FATIGUE+TEAM_ADV   │   -6.8%  │ 0.589 │ STRICT threshold
+
+ACB разбор
+----------
+AUC=0.589 подтверждает предсказательную силу модели — испанский рынок физически
+понят. Проблема в рыночном барьере: букмекеры систематически завышают тоталы ACB,
+уничтожая валуй при стандартных порогах (0.54–0.58).
+
+Решение: ACB использует ``BASE+FATIGUE+TEAM_ADV`` (лучший AUC), но активируется
+только при уверенности ≥ ``STRICT_THRESHOLD_LEAGUES["ACB"]`` = 0.60. Такой порог
+отсекает инфляционные маркет-ситуации и оставляет только железобетонные матчи.
+Использовать ``get_league_min_threshold()`` перед генерацией ставок.
+
+CBA (Китай): AUC=0.459 < 0.5 — модель предсказывает наоборот. Полный бан.
 
 Design choice
 -------------
-Lookup-based strategy: a ``dict[league_key, frozenset[FeatureGroup]]``
-mapping declares which feature groups each league uses. Unlisted leagues
-fall back to ``DEFAULT_GROUPS`` (BASE only). This keeps the rule extensible
-(new groups go in the enum + ``_GROUP_COLUMNS``) without touching call-sites.
+Lookup-based strategy: a ``dict[league_key, frozenset[FeatureGroup]]`` mapping
+declares which groups each league uses. Unlisted leagues fall back to
+``DEFAULT_GROUPS`` (BASE only) — safe for new or data-sparse leagues.
 """
 from __future__ import annotations
 
@@ -36,18 +64,16 @@ class FeatureGroup(StrEnum):
     Members:
         BASE: Always-on features — rolling score stats (incl. universal H2),
             matchup deltas, context (``home_days_rest`` etc.). Never dropped.
-        FATIGUE: V7 schedule-fatigue columns (10 cols). Densely-scheduled
-            leagues benefit; sparsely-scheduled ones get noise.
-        ADVANCED: Four-Factors metrics (ORtg/DRtg/TOV%/true_pace + has_boxscore).
-            Only meaningful where box-score exists (Sofascore). At homogeneous
-            NBA pace these collapse to scaled copies of raw points
-            (multicollinearity) and add noise — disabled by default.
-        ARENA: V8 home-court fortress / away vulnerability indices. European
-            leagues have strong home-court regimes; enabled there, off for NBA.
+        FATIGUE: Schedule-fatigue columns (10 cols). Densely-scheduled leagues
+            benefit (NBA, BBL); sparsely-scheduled ones get noise.
+        ADVANCED: Four-Factors metrics derived from quarter_stats possessions
+            (ORtg/DRtg/TOV%/true_pace). Disabled everywhere — at homogeneous
+            pace they collapse to scaled copies of raw points (V6 finding).
+        ARENA: Home-court fortress / away vulnerability indices (V8). Not
+            included in V9 grid combos; kept for future experimentation.
         TEAM_ADV: Box-score advanced metrics (ORtg/DRtg/true_pace/3PA/3PA-rate,
-            rolled L5+EMA) sourced from team_match_advanced (Go scout). Real
-            efficiency signal for leagues the box score was scraped for —
-            currently EuroLeague (current season fully backfilled).
+            rolled L5+EMA) from ``team_match_advanced`` (Go scout). Real signal
+            where box scores were scraped — LegaA +25.2% ROI proof (V9).
     """
     BASE     = "base"
     FATIGUE  = "fatigue"
@@ -56,35 +82,58 @@ class FeatureGroup(StrEnum):
     TEAM_ADV = "team_adv"
 
 
-# Leagues with structurally strong home-court advantage (European hardcore):
-# ARENA group is enabled for these. tournament_name values as stored in DB.
-_ARENA_LEAGUES: tuple[str, ...] = (
-    "EuroLeague", "ABA", "ACB", "BBL", "LNB", "LegaA", "VTB", "Israel",
-)
+# ── Grid-search validated per-league configs (V9) ────────────────────────────
 
-# Per-league enabled groups. Unlisted leagues fall back to DEFAULT_GROUPS.
-# Documented empirically in postmortem V7 / V7.1 / V8.
-#
-# NBA: fatigue helps (dense calendar). ADVANCED off — the isolation test showed
-# Four-Factors metrics are redundant at NBA's uniform pace. ARENA off pending
-# separate validation.
-FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
-    "NBA": frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
-    # EuroLeague: box-score advanced backfilled (current season) → TEAM_ADV on.
-    "EuroLeague": frozenset({FeatureGroup.BASE, FeatureGroup.ARENA, FeatureGroup.TEAM_ADV}),
-    **{
-        league: frozenset({FeatureGroup.BASE, FeatureGroup.ARENA})
-        for league in _ARENA_LEAGUES
-        if league != "EuroLeague"
-    },
+# Leagues where model cannot beat the bookmaker at any confidence level.
+# AUC < 0.5 means the model predicts the opposite of reality — full ban.
+# Inference layer must call ``is_league_unprofitable()`` before staking.
+UNPROFITABLE_LEAGUES: frozenset[str] = frozenset({"CBA"})
+
+# Leagues with genuine predictive power (AUC > 0.5) but inflated bookmaker
+# lines that require higher confidence to overcome the market barrier.
+# Key = tournament_name, Value = minimum probability threshold for bet entry.
+# Use ``get_league_min_threshold()`` instead of reading this dict directly.
+STRICT_THRESHOLD_LEAGUES: dict[str, float] = {
+    # ACB (Spain): AUC=0.589 — модель понимает физику лиги, но букмекеры
+    # систематически завышают тоталы. Порог 0.60 отсекает инфляционные ситуации.
+    "ACB": 0.60,
 }
 
-# Fallback for any unlisted league or for mixed-league pipelines where no
-# single league key applies (e.g. the OTHER control group).
+# Default minimum probability threshold applied to all unlisted leagues.
+DEFAULT_MIN_THRESHOLD: float = 0.54
+
+# Per-league enabled feature groups, validated by grid search 2026-05-31.
+# Unlisted leagues fall back to DEFAULT_GROUPS (BASE only).
+FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
+    # ── BASE + FATIGUE + TEAM_ADV ──────────────────────────────────────────
+    "LegaA":      frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE, FeatureGroup.TEAM_ADV}),
+    "EuroLeague": frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE, FeatureGroup.TEAM_ADV}),
+    # ACB: AUC=0.589 — используем лучший combo по AUC; порог жёсткий (0.60).
+    "ACB":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE, FeatureGroup.TEAM_ADV}),
+
+    # ── BASE + FATIGUE ─────────────────────────────────────────────────────
+    "NBA":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
+    "BBL":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
+
+    # ── BASE + TEAM_ADV ────────────────────────────────────────────────────
+    "LNB":        frozenset({FeatureGroup.BASE, FeatureGroup.TEAM_ADV}),
+
+    # ── BASE only ──────────────────────────────────────────────────────────
+    "Israel":     frozenset({FeatureGroup.BASE}),
+    "BLeague":    frozenset({FeatureGroup.BASE}),
+    "NBL":        frozenset({FeatureGroup.BASE}),
+    "ABA":        frozenset({FeatureGroup.BASE}),
+
+    # ── UNPROFITABLE — BASE fallback + WARNING ─────────────────────────────
+    # CBA: AUC=0.459 — модель предсказывает наоборот, полный бан.
+    "CBA":        frozenset({FeatureGroup.BASE}),
+}
+
+# Fallback for any unlisted league or mixed-league pipelines (None key).
 DEFAULT_GROUPS: frozenset[FeatureGroup] = frozenset({FeatureGroup.BASE})
 
-# Group → the column names it controls. BASE is implicit (everything not
-# listed in another group). Only non-base groups need an entry here.
+# Group → column names it controls. BASE is implicit (all columns not listed
+# in another group). Only non-base groups need an entry here.
 _GROUP_COLUMNS: dict[FeatureGroup, frozenset[str]] = {
     FeatureGroup.FATIGUE:  frozenset(FATIGUE_FEATURE_COLS),
     FeatureGroup.ADVANCED: frozenset(ADVANCED_FEAT_COLS),
@@ -92,34 +141,92 @@ _GROUP_COLUMNS: dict[FeatureGroup, frozenset[str]] = {
     FeatureGroup.TEAM_ADV: frozenset(TEAM_ADV_FEAT_COLS),
 }
 
-# Columns always hidden from the model (V4 invariant — line-derived).
+# Columns always hidden from the model (V4 invariant — line-derived leakage).
 _ALWAYS_EXCLUDED: frozenset[str] = frozenset(BM_COLS)
 
 
-def get_excluded_features(league_key: str | None) -> frozenset[str]:
-    """Return the set of column names to hide from the model for one league.
+# ── Public API ────────────────────────────────────────────────────────────────
 
-    Combines the V4 invariant (``BM_COLS``, always excluded) with the
-    league-specific feature-group rules. For each ``FeatureGroup`` NOT in
-    the league's allow-list, its columns are added to the excluded set.
+def is_league_unprofitable(league_key: str | None) -> bool:
+    """Return True when grid-search confirmed the league is unprofitable.
+
+    Callers (inference pipelines, bet-sizers) should gate on this before
+    placing a stake. The feature selector still runs normally — unprofitable
+    leagues can be trained/evaluated for research, just not bet on.
+
+    Note: ACB is NOT in UNPROFITABLE_LEAGUES. It has a strict threshold
+    instead — use ``get_league_min_threshold()`` to enforce it.
 
     Args:
-        league_key: Value of ``matches.tournament_name`` (e.g. ``"NBA"``,
-            ``"ABA"``, ``"Israel"``). ``None`` triggers ``DEFAULT_GROUPS``
-            fallback (used for mixed-league pipelines).
+        league_key: ``matches.tournament_name`` value, or ``None``.
+
+    Returns:
+        ``True`` only for leagues in ``UNPROFITABLE_LEAGUES``.
+    """
+    return league_key in UNPROFITABLE_LEAGUES
+
+
+def get_league_min_threshold(league_key: str | None) -> float:
+    """Return the minimum probability threshold for bet placement.
+
+    Most leagues use ``DEFAULT_MIN_THRESHOLD`` (0.54). Leagues in
+    ``STRICT_THRESHOLD_LEAGUES`` (e.g. ACB) require higher confidence to
+    overcome inflated bookmaker lines — use the returned threshold instead of
+    the global default when filtering bet candidates.
+
+    Args:
+        league_key: ``matches.tournament_name`` value, or ``None``.
+
+    Returns:
+        Minimum probability threshold in [0.5, 1.0). Always ≥ 0.54.
+    """
+    if league_key is None:
+        return DEFAULT_MIN_THRESHOLD
+    threshold = STRICT_THRESHOLD_LEAGUES.get(league_key, DEFAULT_MIN_THRESHOLD)
+    if threshold > DEFAULT_MIN_THRESHOLD:
+        log.debug(
+            "Feature selector: league=%s использует жёсткий порог %.2f "
+            "(стандартный %.2f) — рыночный барьер завышенных линий.",
+            league_key, threshold, DEFAULT_MIN_THRESHOLD,
+        )
+    return threshold
+
+
+def get_excluded_features(league_key: str | None) -> frozenset[str]:
+    """Return the column names to hide from the model for one league.
+
+    Combines the V4 invariant (``BM_COLS``, always excluded) with the
+    grid-search-validated per-league group rules. For each ``FeatureGroup``
+    NOT in the league's allow-list, its columns are added to the excluded set.
+
+    Unprofitable leagues (CBA) fall back to BASE and emit a WARNING so
+    monitoring can detect when an inference request targets them.
+
+    Args:
+        league_key: ``matches.tournament_name`` (e.g. ``"NBA"``, ``"LegaA"``).
+            ``None`` triggers ``DEFAULT_GROUPS`` fallback (mixed-league pipelines).
 
     Returns:
         Immutable frozenset of column names that ``get_x`` must drop.
     """
+    if is_league_unprofitable(league_key):
+        log.warning(
+            "ПРОПУСК: лига %s помечена как УБЫТОЧНАЯ "
+            "(Grid Search: все комбинации фичей дали отрицательный ROI). "
+            "Применяется BASE fallback — ставки по этой лиге запрещены.",
+            league_key,
+        )
+
     enabled = (
         FEATURES_BY_LEAGUE.get(league_key, DEFAULT_GROUPS)
         if league_key is not None
         else DEFAULT_GROUPS
     )
-    excluded = _ALWAYS_EXCLUDED
+    excluded: frozenset[str] = _ALWAYS_EXCLUDED
     for group, cols in _GROUP_COLUMNS.items():
         if group not in enabled:
             excluded = excluded | cols
+
     log.debug(
         "Feature selector: league=%s → enabled=%s, excluded=%d cols",
         league_key, sorted(g.value for g in enabled), len(excluded),

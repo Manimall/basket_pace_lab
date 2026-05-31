@@ -1,0 +1,5 @@
+league,combo,n_train,n_test,n_features,log_loss,roc_auc,roi_0.54,bets_0.54,roi_0.56,bets_0.56,roi_0.58,bets_0.58,best_roi,best_thr,best_bets
+EuroLeague,BASE,321,80,58,1.1408,0.4456,-13.14,70,-14.64,69,-12.09,67,-12.09,0.58,67
+EuroLeague,BASE+FATIGUE,321,80,68,1.127,0.4613,-6.2,79,-8.7,77,-10.0,76,-6.2,0.54,79
+EuroLeague,BASE+FATIGUE+TEAM_ADV,321,80,88,0.9797,0.5148,1.17,77,-1.2,75,0.14,74,1.17,0.54,77
+EuroLeague,BASE+TEAM_ADV,321,80,78,1.0327,0.4827,-3.73,75,-3.7,73,-3.7,73,-3.7,0.56,73
