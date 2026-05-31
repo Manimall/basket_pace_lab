@@ -52,19 +52,17 @@ import asyncio
 import json
 import logging
 import sys
-import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
-
-import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from curl_cffi.requests import AsyncSession
 from sqlalchemy import text
 
+from src.data_collection.flashscore.norm import _norm, _sim  # battle-tested normaliser
 from src.data_collection.sofascore.catalog import LEAGUE_CATALOG
 from src.database.engine import dispose_engine, get_session_factory
 
@@ -75,48 +73,24 @@ log = logging.getLogger(__name__)
 
 _COOKIES_PATH = Path(__file__).resolve().parent.parent / "cookies.json"
 _BASE_URL     = "https://api.sofascore.com/api/v1"
-_HEADERS: dict[str, str] = {
-    "Accept":           "application/json, text/plain, */*",
-    "Accept-Language":  "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Origin":           "https://www.sofascore.com",
-    "Referer":          "https://www.sofascore.com/",
-    "Cache-Control":    "no-cache",
-    "Pragma":           "no-cache",
+_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+_BASE_HEADERS: dict[str, str] = {
+    "Accept":          "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Origin":          "https://www.sofascore.com",
+    "Referer":         "https://www.sofascore.com/",
+    "Cache-Control":   "no-cache",
+    "User-Agent":      _UA,
 }
 
-# ── Team-name normalisation (mirrors flashscore/norm.py) ─────────────────────
 
-_STOP = re.compile(
-    r"\b(basketball|club|bc|bk|fc|sk|ak|kk|as|bc|bb|sport|bball|city|team|"
-    r"real|istanbul|milan|milano|london|basket|baskets|"
-    r"telekom|ewe|ratiopharm|"
-    r"ea7|emporio|armani|ldlc|beko|meridianbet|mozzart|bet|admiralbet|"
-    r"maccabi|hapoel|ironi|bnei|elitzur|"  # Israeli prefixes
-    r"segafredo|virtus|reyer|venezia|brescia|varese|reggiana)\b",
-    re.IGNORECASE,
-)
-_PUNCT = re.compile(r"[^a-z0-9 ]")
-
-
-def _norm(name: str) -> str:
-    name = unicodedata.normalize("NFKD", name)
-    name = "".join(c for c in name if not unicodedata.combining(c))
-    name = name.lower().strip()
-    name = _STOP.sub(" ", name)
-    name = _PUNCT.sub(" ", name)
-    return " ".join(name.split())
-
-
-def _sim(a: str, b: str) -> float:
-    ta, tb = set(a.split()), set(b.split())
-    if not ta or not tb:
-        return 0.0
-    overlap = len(ta & tb) / max(len(ta), len(tb))
-    big, small = (ta, tb) if len(ta) >= len(tb) else (tb, ta)
-    if small and small.issubset(big):
-        containment = 0.5 + 0.25 * (len(small) / len(big))
-        overlap = max(overlap, containment)
-    return overlap
+def _build_headers(cookie_header: str) -> dict[str, str]:
+    h = dict(_BASE_HEADERS)
+    if cookie_header:
+        h["Cookie"] = cookie_header
+    return h
 
 
 # ── Data structures ───────────────────────────────────────────────────────────
@@ -144,21 +118,27 @@ class _DbRow:
 
 # ── Sofascore API fetch ───────────────────────────────────────────────────────
 
-def _load_cookies() -> list[dict] | None:
+def _load_cookie_header() -> str:
+    """Render cookies.json as a 'name=value; …' Cookie header string (Go-scout style)."""
     if not _COOKIES_PATH.exists():
-        return None
+        return ""
     try:
-        data = json.loads(_COOKIES_PATH.read_text())
-        return data if isinstance(data, list) else None
+        cookies = json.loads(_COOKIES_PATH.read_text())
+        if isinstance(cookies, list):
+            return "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
     except Exception:
-        return None
+        pass
+    return ""
 
 
-async def _api_get(session: AsyncSession, path: str) -> dict | None:
+async def _api_get(session: AsyncSession, path: str, headers: dict[str, str]) -> dict | None:
     url = f"{_BASE_URL}{path}"
     try:
-        r = await session.get(url, headers=_HEADERS, timeout=15)
-        return r.json() if r.status_code == 200 else None
+        r = await session.get(url, headers=headers, timeout=15)
+        if r.status_code != 200:
+            log.debug("API %s → %d", path, r.status_code)
+            return None
+        return r.json()
     except Exception as exc:
         log.debug("API error %s: %s", path, exc)
         return None
@@ -168,14 +148,19 @@ async def _fetch_events_for_season(
     session: AsyncSession,
     tournament_id: int,
     season_id: int,
+    headers: dict[str, str],
     max_pages: int = 50,
+    page_delay: float = 1.5,
 ) -> list[_SofaEvent]:
-    """Fetch all finished events for one season, returning parsed _SofaEvent list."""
+    """Fetch all finished events for one season. page_delay reduces WAF rate-limit risk."""
     events: list[_SofaEvent] = []
     for page in range(max_pages):
+        if page > 0:
+            await asyncio.sleep(page_delay)
         data = await _api_get(
             session,
             f"/unique-tournament/{tournament_id}/season/{season_id}/events/last/{page}",
+            headers,
         )
         if not data:
             break
@@ -282,14 +267,14 @@ async def run(
     dry_run: bool,
 ) -> None:
     sf = get_session_factory()
-    cookies = _load_cookies()
+    cookie_header = _load_cookie_header()
+    headers = _build_headers(cookie_header)
+    if cookie_header:
+        log.info("Loaded cookies from %s (%d bytes)", _COOKIES_PATH, len(cookie_header))
+    else:
+        log.warning("No cookies — Sofascore may return 403.")
 
-    async with AsyncSession(impersonate="chrome124", headers=_HEADERS) as session:
-        if cookies:
-            for c in cookies:
-                session.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
-            log.info("Loaded %d cookies from %s", len(cookies), _COOKIES_PATH)
-
+    async with AsyncSession(impersonate="chrome124") as session:
         totals = {"matched": 0, "unmatched": 0, "already_numeric": 0, "conflict": 0}
 
         for league_key in leagues:
@@ -323,7 +308,8 @@ async def run(
                 sid   = season["id"]
                 sname = season["name"]
                 log.info("[%s] Fetching Sofascore events: %s (season %d)…", league_key, sname, sid)
-                evs = await _fetch_events_for_season(session, tid, sid)
+                await asyncio.sleep(3)   # inter-season cooldown — avoids WAF rate-limit
+                evs = await _fetch_events_for_season(session, tid, sid, headers)
                 new = [e for e in evs if e.event_id not in seen_event_ids]
                 seen_event_ids.update(e.event_id for e in new)
                 all_events.extend(new)
