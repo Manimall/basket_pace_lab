@@ -17,6 +17,7 @@ Feature combos tested (BASE is always on):
 Usage:
     cd /path/to/basket_pace_lab
     python scripts/grid_search_leagues.py
+    python scripts/grid_search_leagues.py --leagues EuroLeague NBA
     python scripts/grid_search_leagues.py --csv results/grid_$(date +%F).csv
     python scripts/grid_search_leagues.py --min-bets 15 --csv out.csv
 """
@@ -27,6 +28,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -43,7 +45,7 @@ from src.evaluation.feature_selector import (
     _ALWAYS_EXCLUDED,
     _GROUP_COLUMNS,
 )
-from src.evaluation.simulation import SimulationParams, run_threshold_sweep
+from src.evaluation.simulation import BetReport, SimulationParams, run_threshold_sweep
 from src.features.score_features import ALL_FEAT, CAT_COLS, TARGET, build_features, load_data
 from src.models.evaluation import chrono_split
 
@@ -69,12 +71,12 @@ GRID_THRESHOLDS: tuple[float, ...] = (0.54, 0.56, 0.58)
 # ── Feature helpers (bypass FEATURES_BY_LEAGUE for the grid) ─────────────────
 
 def _excluded_for_combo(enabled: frozenset[FeatureGroup]) -> frozenset[str]:
-    """Build the exclusion set for a given enabled-group frozenset.
+    """Build exclusion set for a given enabled-group frozenset.
 
     Mirrors feature_selector.get_excluded_features but takes the enabled set
     directly instead of a league key — lets the grid override the lookup table.
     """
-    excluded = _ALWAYS_EXCLUDED
+    excluded: frozenset[str] = _ALWAYS_EXCLUDED
     for group, cols in _GROUP_COLUMNS.items():
         if group not in enabled:
             excluded = excluded | cols
@@ -84,7 +86,8 @@ def _excluded_for_combo(enabled: frozenset[FeatureGroup]) -> frozenset[str]:
 def _get_x(df: pd.DataFrame, excluded: frozenset[str]) -> pd.DataFrame:
     feat_cols = [c for c in ALL_FEAT if c in df.columns and c not in excluded]
     X = df[feat_cols].copy()
-    X["league"] = X["league"].astype(str)
+    if "league" in X.columns:
+        X["league"] = X["league"].astype(str)
     return X
 
 
@@ -110,27 +113,48 @@ def prepare_dataset() -> pd.DataFrame:
         df = df[df[TARGET] != df[LINE_COL]].reset_index(drop=True)
 
     df[BIN_TARGET] = (df[TARGET] > df[LINE_COL]).astype(int)
-    over_rate = 100.0 * df[BIN_TARGET].mean()
-    log.info("  Binary target set. Overall OVER rate: %.2f%%", over_rate)
+    log.info("  Binary target set. Overall OVER rate: %.2f%%",
+             100.0 * df[BIN_TARGET].mean())
     return df
 
 
 # ── Per-cell runner ───────────────────────────────────────────────────────────
 
+def _best_roi_from_reports(
+    reports: list[BetReport],
+    min_bets: int,
+) -> tuple[float, str, int]:
+    """Return (best_roi %, threshold_str, n_bets) for the best working threshold.
+
+    A threshold qualifies only when it has at least min_bets placed bets.
+    Returns (nan, '—', 0) when no threshold qualifies.
+    """
+    best_roi  = float("nan")
+    best_thr  = "—"
+    best_bets = 0
+    for r in reports:
+        if r.n < min_bets:
+            continue
+        if np.isnan(best_roi) or r.roi > best_roi:
+            best_roi  = r.roi
+            best_thr  = r.row_label
+            best_bets = r.n
+    return round(best_roi, 2) if not np.isnan(best_roi) else best_roi, best_thr, best_bets
+
+
 def run_cell(
-    subset: pd.DataFrame,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
     enabled: frozenset[FeatureGroup],
     params: SimulationParams,
     min_bets: int,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Train + evaluate one (league, combo) cell.
 
-    Returns a metrics dict, or None if the subset is too small to trust.
+    Takes pre-split train/test DataFrames (caller computes the split once per
+    league, not once per combo). Returns a metrics dict or None when skipped.
     """
     guards = settings.evaluation
-    train_df, test_dict = chrono_split(subset)
-    test_df = pd.concat(test_dict.values(), ignore_index=True)
-
     if len(train_df) < guards.min_train_rows or len(test_df) < guards.min_test_rows:
         log.warning(
             "  Skipped: train=%d (min %d) / test=%d (min %d)",
@@ -139,65 +163,64 @@ def run_cell(
         )
         return None
 
-    excluded = _excluded_for_combo(enabled)
-    X_tr = _get_x(train_df, excluded)
-    y_tr = train_df[BIN_TARGET].astype(int).to_numpy()
+    try:
+        excluded = _excluded_for_combo(enabled)
+        X_tr = _get_x(train_df, excluded)
+        X_te = _get_x(test_df,  excluded)
 
-    cfg = settings.model
-    model = CatBoostClassifier(
-        iterations=cfg.catboost_iterations,
-        learning_rate=cfg.catboost_lr,
-        depth=cfg.catboost_depth,
-        loss_function="Logloss",
-        eval_metric="AUC",
-        cat_features=CAT_COLS,
-        random_seed=cfg.catboost_seed,
-        verbose=0,
-    )
-    model.fit(X_tr, y_tr)
+        if X_tr.empty or X_te.empty or X_tr.shape[1] == 0:
+            log.warning("  Skipped: empty feature matrix after exclusion.")
+            return None
 
-    X_te    = _get_x(test_df, excluded)
-    probs   = model.predict_proba(X_te)[:, 1]
-    y_te    = test_df[BIN_TARGET].astype(int).to_numpy()
-    actuals = test_df[TARGET].to_numpy()
-    lines   = test_df[LINE_COL].to_numpy()
+        y_tr = train_df[BIN_TARGET].astype(int).to_numpy()
 
-    ll  = log_loss(y_te, probs, labels=[0, 1])
-    auc = roc_auc_score(y_te, probs) if len(np.unique(y_te)) > 1 else float("nan")
+        if len(np.unique(y_tr)) < 2:
+            log.warning("  Skipped: training labels are single-class.")
+            return None
 
-    reports = run_threshold_sweep(probs, actuals, lines, params)
+        cfg = settings.model
+        model = CatBoostClassifier(
+            iterations    = cfg.catboost_iterations,
+            learning_rate = cfg.catboost_lr,
+            depth         = cfg.catboost_depth,
+            loss_function = "Logloss",
+            eval_metric   = "AUC",
+            cat_features  = CAT_COLS,
+            random_seed   = cfg.catboost_seed,
+            verbose       = 0,
+        )
+        model.fit(X_tr, y_tr)
 
-    result: dict = {
-        "n_train":    len(train_df),
-        "n_test":     len(test_df),
-        "n_features": X_tr.shape[1],
-        "log_loss":   round(ll, 4),
-        "roc_auc":    round(auc, 4),
-    }
-    for report in reports:
-        thr = report.row_label  # "0.54", "0.56", "0.58"
-        roi = round(report.roi, 2) if report.n >= min_bets else float("nan")
-        result[f"roi_{thr}"] = roi
-        result[f"bets_{thr}"] = report.n
+        probs   = model.predict_proba(X_te)[:, 1]
+        y_te    = test_df[BIN_TARGET].astype(int).to_numpy()
+        actuals = test_df[TARGET].to_numpy()
+        lines   = test_df[LINE_COL].to_numpy()
 
-    # Best ROI among thresholds that have enough bets.
-    valid = [
-        (result[f"roi_{t:.2f}"], f"{t:.2f}", result[f"bets_{t:.2f}"])
-        for t in GRID_THRESHOLDS
-        if not np.isnan(result[f"roi_{t:.2f}"])
-        and result[f"bets_{t:.2f}"] >= min_bets
-    ]
-    if valid:
-        best_roi, best_thr, best_bets = max(valid, key=lambda x: x[0])
-        result["best_roi"]  = round(best_roi, 2)
+        ll  = log_loss(y_te, probs, labels=[0, 1])
+        auc = roc_auc_score(y_te, probs) if len(np.unique(y_te)) > 1 else float("nan")
+
+        reports = run_threshold_sweep(probs, actuals, lines, params)
+
+        result: dict[str, Any] = {
+            "n_train":    len(train_df),
+            "n_test":     len(test_df),
+            "n_features": X_tr.shape[1],
+            "log_loss":   round(ll, 4),
+            "roc_auc":    round(auc, 4),
+        }
+        for r in reports:
+            result[f"roi_{r.row_label}"]  = round(r.roi, 2) if r.n >= min_bets else float("nan")
+            result[f"bets_{r.row_label}"] = r.n
+
+        best_roi, best_thr, best_bets = _best_roi_from_reports(reports, min_bets)
+        result["best_roi"]  = best_roi
         result["best_thr"]  = best_thr
         result["best_bets"] = best_bets
-    else:
-        result["best_roi"]  = float("nan")
-        result["best_thr"]  = "—"
-        result["best_bets"] = 0
+        return result
 
-    return result
+    except Exception as exc:
+        log.error("  Cell failed with exception: %s", exc, exc_info=True)
+        return None
 
 
 # ── Output helpers ────────────────────────────────────────────────────────────
@@ -213,11 +236,11 @@ def _print_table(df: pd.DataFrame, title: str) -> None:
     print()
 
 
-def _build_full_table(records: list[dict]) -> pd.DataFrame:
+def _build_full_table(records: list[dict[str, Any]]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
     df = pd.DataFrame(records)
-    thr_cols = []
+    thr_cols: list[str] = []
     for t in GRID_THRESHOLDS:
         ts = f"{t:.2f}"
         thr_cols += [f"roi_{ts}", f"bets_{ts}"]
@@ -229,13 +252,14 @@ def _build_full_table(records: list[dict]) -> pd.DataFrame:
         "best_roi", "best_thr", "best_bets",
     ]
     cols = [c for c in cols if c in df.columns]
-    df = df[cols].sort_values(["league", "combo"]).reset_index(drop=True)
-    return df
+    return df[cols].sort_values(["league", "combo"]).reset_index(drop=True)
 
 
 def _build_winner_table(full: pd.DataFrame) -> pd.DataFrame:
     """One row per league: the combo with the highest best_roi (enough bets)."""
-    rows = []
+    if full.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
     for league, grp in full.groupby("league"):
         viable = grp.dropna(subset=["best_roi"])
         if viable.empty:
@@ -245,7 +269,11 @@ def _build_winner_table(full: pd.DataFrame) -> pd.DataFrame:
                 "log_loss": float("nan"), "roc_auc": float("nan"),
             })
             continue
-        best = viable.loc[viable["best_roi"].idxmax()]
+        # Tie-break: highest best_roi first, then most bets (better-sampled combo wins).
+        idx = viable.sort_values(
+            ["best_roi", "best_bets"], ascending=False
+        ).index[0]
+        best = viable.loc[idx]
         rows.append({
             "league":       league,
             "winner_combo": best["combo"],
@@ -265,11 +293,22 @@ def _build_winner_table(full: pd.DataFrame) -> pd.DataFrame:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--csv",      default="", metavar="PATH",
-                   help="Save full grid results to this CSV (optional)")
-    p.add_argument("--min-bets", type=int, default=10, metavar="N",
-                   help="Min bets at a threshold to treat its ROI as reliable (default: 10)")
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--leagues", nargs="*", metavar="LEAGUE", default=None,
+        help="Leagues to include (default: all in dataset). E.g. --leagues EuroLeague NBA",
+    )
+    p.add_argument(
+        "--csv", default="", metavar="PATH",
+        help="Save full grid results to this CSV (optional)",
+    )
+    p.add_argument(
+        "--min-bets", type=int, default=10, metavar="N",
+        help="Min bets at a threshold to treat its ROI as reliable (default: 10)",
+    )
     return p.parse_args()
 
 
@@ -278,8 +317,19 @@ def main() -> None:
 
     df = prepare_dataset()
 
-    leagues = sorted(df["league"].dropna().unique().tolist())
-    log.info("Leagues in dataset (%d): %s", len(leagues), leagues)
+    all_leagues: list[str] = sorted(df["league"].dropna().unique().tolist())
+    if args.leagues:
+        unknown = [lg for lg in args.leagues if lg not in all_leagues]
+        if unknown:
+            log.warning("Unknown leagues (not in dataset): %s", unknown)
+        leagues: list[str] = [lg for lg in args.leagues if lg in all_leagues]
+        if not leagues:
+            log.error("None of the requested leagues found in the dataset. Available: %s",
+                      all_leagues)
+            sys.exit(1)
+    else:
+        leagues = all_leagues
+    log.info("Running grid for %d league(s): %s", len(leagues), leagues)
 
     params = SimulationParams(
         odds            = settings.evaluation.odds,
@@ -290,18 +340,28 @@ def main() -> None:
         ci_alpha        = settings.evaluation.bootstrap_ci_alpha,
     )
 
-    records: list[dict] = []
+    records: list[dict[str, Any]] = []
     total = len(leagues) * len(COMBOS)
     done  = 0
+
     for league in leagues:
         subset = df[df["league"] == league].reset_index(drop=True)
         log.info("── League: %-20s  rows: %d", league, len(subset))
+
+        if subset.empty:
+            log.warning("  No data for league '%s' — skipping.", league)
+            continue
+
+        # Split once per league; reuse across all 4 combos (efficiency).
+        train_df, test_dict = chrono_split(subset)
+        test_df = pd.concat(test_dict.values(), ignore_index=True)
+
         for combo_name, enabled in COMBOS.items():
             done += 1
             log.info("  [%d/%d] %s × %s", done, total, league, combo_name)
-            cell = run_cell(subset, enabled, params, args.min_bets)
+            cell = run_cell(train_df, test_df, enabled, params, args.min_bets)
             if cell is None:
-                log.info("  → skipped (too few rows)")
+                log.info("  → skipped")
                 continue
             cell["league"] = league
             cell["combo"]  = combo_name
