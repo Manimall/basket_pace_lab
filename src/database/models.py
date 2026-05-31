@@ -215,3 +215,36 @@ class QuarterStats(Base):
     )
 
     match: Mapped["Match"] = relationship("Match", back_populates="quarter_stats")
+
+
+# ---------------------------------------------------------------------------
+# TeamMatchAdvanced
+# ---------------------------------------------------------------------------
+
+class TeamMatchAdvanced(Base):
+    """Per-team, per-match box-score metrics (Go scout → Sofascore).
+
+    Mirrors migration ``002`` — kept in the ORM so ``create_tables`` provisions
+    a fresh DB without the raw SQL file.
+    """
+
+    __tablename__ = "team_match_advanced"
+
+    match_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("matches.id", ondelete="CASCADE"), primary_key=True
+    )
+    team_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("teams.id", ondelete="RESTRICT"), primary_key=True, index=True
+    )
+
+    possessions:              Mapped[Optional[float]] = mapped_column(Float)
+    true_pace:                Mapped[Optional[float]] = mapped_column(Float)
+    turnovers:                Mapped[Optional[int]]   = mapped_column(SmallInteger)
+    three_pointers_made:      Mapped[Optional[int]]   = mapped_column(SmallInteger)
+    three_pointers_attempted: Mapped[Optional[int]]   = mapped_column(SmallInteger)
+    offensive_rating:         Mapped[Optional[float]] = mapped_column(Float)
+    defensive_rating:         Mapped[Optional[float]] = mapped_column(Float)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow
+    )

@@ -23,6 +23,7 @@ from src.features.advanced_metrics import (
 from src.features.arena_context import ARENA_FEAT_COLS, add_arena_context
 from src.features.context_features import add_bookmaker_signals, add_rest_and_playoff
 from src.features.fatigue import FATIGUE_FEATURE_COLS, add_fatigue_features
+from src.features.queries import SQL_MATCHES, SQL_QS
 from src.features.rolling_utils import (
     EMA_SPAN,
     MATCHUP_COLS,
@@ -32,6 +33,7 @@ from src.features.rolling_utils import (
     fill_feature_nans,
     merge_rolling_by_side,
 )
+from src.features.team_advanced import TEAM_ADV_FEAT_COLS, add_team_advanced
 
 log = logging.getLogger(__name__)
 
@@ -57,78 +59,44 @@ CAT_COLS: list[str]  = ["league"]
 BM_COLS: list[str]   = ["bookmaker_total_closing", "market_vs_history_delta"]
 ALL_FEAT: list[str]  = (
     ROLL_FEAT_COLS + list(MATCHUP_COLS) + CTX_COLS + FATIGUE_FEATURE_COLS
-    + ADVANCED_FEAT_COLS + ARENA_FEAT_COLS + BM_COLS + CAT_COLS
+    + ADVANCED_FEAT_COLS + ARENA_FEAT_COLS + TEAM_ADV_FEAT_COLS + BM_COLS + CAT_COLS
 )
-
-# ── SQL ───────────────────────────────────────────────────────────────────────
-
-# Current-season hard gate. Past seasons are dropped at SQL load time to keep
-# the entire pipeline (build_features, prepare_dataset, validate_by_league,
-# backtester*) on a single chronological cohort. See FeatureConfig docstring.
-_SQL_MATCHES = """
-    SELECT
-        m.id           AS match_id,
-        m.scheduled_at,
-        m.home_team_id,
-        m.away_team_id,
-        m.home_score_final,
-        m.away_score_final,
-        m.season_type::text AS season_type,
-        COALESCE(m.tournament_name, 'NBA') AS league,
-        m.total_line,
-        m.total_line_open
-    FROM matches m
-    WHERE m.home_score_final IS NOT NULL
-      AND m.away_score_final IS NOT NULL
-      AND m.has_quarter_breakdown = TRUE
-      AND m.scheduled_at >= :current_season_start
-    ORDER BY m.scheduled_at
-"""
-
-_SQL_QS = """
-    SELECT qs.match_id, qs.period_number,
-           qs.home_score,        qs.away_score,
-           qs.home_pace,         qs.away_pace,
-           qs.home_possessions,  qs.away_possessions,
-           qs.home_turnovers,    qs.away_turnovers
-    FROM quarter_stats qs
-    JOIN matches m ON m.id = qs.match_id
-    WHERE qs.period_type::text = 'QUARTER'
-      AND qs.period_number IN (1, 2, 3, 4)
-      AND m.scheduled_at >= :current_season_start
-    ORDER BY qs.match_id, qs.period_number
-"""
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 
 async def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load current-season matches + quarter_stats from PostgreSQL.
+    """Load current-season matches (+ box-score advanced) and quarter_stats.
 
-    Filters both queries by ``settings.features.current_season_start`` so that
-    every downstream consumer (feature build, backtester, validate_by_league)
+    Filters every query by ``settings.features.current_season_start`` so that
+    each downstream consumer (feature build, backtester, validate_by_league)
     sees the same single-season cohort. Past seasons are treated as
     information poison and excluded at the source.
 
+    The matches frame carries the ``team_match_advanced`` metrics already
+    pivoted to ``home_*`` / ``away_*`` columns via the two LEFT JOINs in
+    ``_SQL_MATCHES`` (NULL where the Go scout hasn't backfilled the match).
+
     Returns:
         Tuple ``(matches, qs)``:
-            * matches: one row per finished match in the current season with
-              quarter breakdown available.
+            * matches: one row per finished current-season match with quarter
+              breakdown, plus home/away box-score advanced columns.
             * qs: four rows per match (Q1-Q4) joined on the same season filter.
     """
     sf            = get_session_factory()
     season_start  = date.fromisoformat(settings.features.current_season_start)
     params        = {"current_season_start": season_start}
     async with sf() as db:
-        m_rows = (await db.execute(text(_SQL_MATCHES), params)).mappings().all()
-        q_rows = (await db.execute(text(_SQL_QS),      params)).mappings().all()
+        m_rows = (await db.execute(text(SQL_MATCHES), params)).mappings().all()
+        q_rows = (await db.execute(text(SQL_QS),      params)).mappings().all()
     await dispose_engine()
     matches = pd.DataFrame(m_rows)
     qs      = pd.DataFrame(q_rows)
     matches["scheduled_at"] = pd.to_datetime(matches["scheduled_at"], utc=True)
+    n_box = int(matches["home_offensive_rating"].notna().sum()) if "home_offensive_rating" in matches else 0
     log.info(
-        "Loaded %d matches, %d QS rows (season ≥ %s).",
-        len(matches), len(qs), season_start.isoformat(),
+        "Loaded %d matches (%d with box-score advanced), %d QS rows (season ≥ %s).",
+        len(matches), n_box, len(qs), season_start.isoformat(),
     )
     return matches, qs
 
@@ -176,7 +144,9 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
 
     shift-1 on every rolling stat guarantees no leakage. NaN in first-game
     rows of score features filled with column mean; advanced metrics left NaN
-    for score-only leagues (no cross-league imputation).
+    for score-only leagues (no cross-league imputation). Box-score advanced
+    columns (``home_*`` / ``away_*`` from ``team_match_advanced``, joined in
+    ``load_data``) are rolled into ORtg/DRtg/3PT features by ``add_team_advanced``.
     """
     # ── quarter scores pivot ──────────────────────────────────────────
     wide = qs.pivot_table(
@@ -237,6 +207,7 @@ def build_features(matches: pd.DataFrame, qs: pd.DataFrame) -> pd.DataFrame:
     df = add_rest_and_playoff(df)
     df = add_fatigue_features(df)
     df = add_advanced_metrics(df, aggregate_box_score(qs))
+    df = add_team_advanced(df)
     df = add_arena_context(df)
     df = add_bookmaker_signals(df)
 
