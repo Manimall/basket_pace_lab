@@ -112,11 +112,11 @@ def test_profitable_leagues_not_flagged(league: str):
 
 
 def test_unprofitable_leagues_emit_warning(caplog):
-    """CBA and ACB must log a WARNING when feature exclusion is requested."""
+    """CBA и ACB должны логировать WARNING при запросе фичей."""
     with caplog.at_level(logging.WARNING, logger="src.evaluation.feature_selector"):
         get_excluded_features("CBA")
-    assert any("UNPROFITABLE" in r.message for r in caplog.records), \
-        "Expected WARNING containing 'UNPROFITABLE' for CBA"
+    assert any("УБЫТОЧНАЯ" in r.message for r in caplog.records), \
+        "Ожидался WARNING со словом 'УБЫТОЧНАЯ' для CBA"
 
 
 @pytest.mark.parametrize("league", ["CBA", "ACB"])
@@ -204,19 +204,18 @@ def test_nba_base_feature_not_excluded():
 # ── Inference layer: run_league_backtest blocks unprofitable leagues ──────────
 
 def test_run_league_backtest_skips_unprofitable_league(caplog):
-    """run_league_backtest must return None and log SKIP for CBA/ACB."""
+    """run_league_backtest должен вернуть None и залогировать ПРОПУСК для CBA/ACB."""
     from unittest.mock import patch
     from src.evaluation.backtest_league import run_league_backtest
 
-    # Patch prepare_dataset so the test never hits the DB
     with patch("src.evaluation.backtest_league.prepare_dataset") as mock_ds, \
          caplog.at_level(logging.WARNING, logger="src.evaluation.backtest_league"):
         result = run_league_backtest("CBA")
 
-    assert result is None, "Unprofitable league must return None, not a BetReport list"
-    mock_ds.assert_not_called(), "prepare_dataset must NOT be called for unprofitable leagues"
-    assert any("SKIP" in r.message and "UNPROFITABLE" in r.message for r in caplog.records), \
-        "Expected WARNING with 'SKIP' and 'UNPROFITABLE' in message"
+    assert result is None, "Убыточная лига должна вернуть None, не список BetReport"
+    mock_ds.assert_not_called()
+    assert any("ПРОПУСК" in r.message and "УБЫТОЧНАЯ" in r.message for r in caplog.records), \
+        "Ожидался WARNING со словами 'ПРОПУСК' и 'УБЫТОЧНАЯ'"
 
 
 def test_run_league_backtest_skips_acb(caplog):
@@ -229,4 +228,4 @@ def test_run_league_backtest_skips_acb(caplog):
 
     assert result is None
     mock_ds.assert_not_called()
-    assert any("SKIP" in r.message for r in caplog.records)
+    assert any("ПРОПУСК" in r.message for r in caplog.records)

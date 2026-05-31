@@ -167,8 +167,9 @@ def get_excluded_features(league_key: str | None) -> frozenset[str]:
     """
     if is_league_unprofitable(league_key):
         log.warning(
-            "Feature selector: league=%s is UNPROFITABLE (grid-search: all combos "
-            "returned negative ROI). Using BASE fallback — do NOT stake on this league.",
+            "Селектор фичей: лига %s помечена как УБЫТОЧНАЯ "
+            "(Grid Search: все комбинации фичей дали отрицательный ROI). "
+            "Применяется BASE fallback — ставки по этой лиге запрещены.",
             league_key,
         )
 

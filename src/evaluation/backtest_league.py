@@ -68,9 +68,9 @@ def run_league_backtest(league_key: str) -> list[BetReport] | None:
     """
     if is_league_unprofitable(league_key):
         log.warning(
-            "SKIP: %s is marked as UNPROFITABLE — "
-            "grid-search confirmed negative ROI across all feature combos. "
-            "No bet should be placed for this league.",
+            "ПРОПУСК: лига %s помечена как УБЫТОЧНАЯ — "
+            "Grid Search подтвердил отрицательный ROI для всех комбинаций фичей. "
+            "Ставки по этой лиге запрещены.",
             league_key,
         )
         return None
@@ -106,9 +106,9 @@ def main() -> None:
     # handles this too, but the explicit early exit here gives a cleaner CLI UX.
     if is_league_unprofitable(args.league):
         log.warning(
-            "SKIP: %s is marked as UNPROFITABLE — "
-            "grid-search confirmed negative ROI across all feature combos. "
-            "No bet should be placed for this league.",
+            "ПРОПУСК: лига %s помечена как УБЫТОЧНАЯ — "
+            "Grid Search подтвердил отрицательный ROI для всех комбинаций фичей. "
+            "Ставки по этой лиге запрещены.",
             args.league,
         )
         return
