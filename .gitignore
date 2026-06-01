@@ -10,3 +10,23 @@ catboost_info/
 
 # Agent-local skills cache — not part of the project code
 .agents/
+
+# Build artifacts
+bin/
+*.cbm.tmp
+
+# Logs & runtime output
+*.log
+
+# Coverage & tool caches
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Orphaned agent skills lock
+skills-lock.json
+
+# Stray legacy grid output (superseded by grid_search_{game,1q,1h}.csv)
+/results/grid_search.csv
