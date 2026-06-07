@@ -91,4 +91,22 @@ COLLECTOR_LEAGUES: dict[str, CollectorLeague] = {
         "season":          "Super League 25/26",
         "season_type":     SeasonType.REGULAR,
     },
+    "VTB": {
+        "path":            "/basketball/russia/vtb-united-league/",
+        "tournament_name": "VTB",
+        "season":          "VTB United League 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "PLK": {
+        "path":            "/basketball/poland/basket-liga/",
+        "tournament_name": "PLK",
+        "season":          "Basket Liga 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "LKL": {
+        "path":            "/basketball/lithuania/lkl/",
+        "tournament_name": "LKL",
+        "season":          "LKL 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
 }
