@@ -175,4 +175,24 @@ LEAGUE_CATALOG: dict[str, LeagueEntry] = {
             {"id": 54443, "name": "Super League 23/24", "code": "2324"},
         ],
     },
+    "PLK": {
+        # Orlen Basket Liga (Poland top division)
+        # sofascore.com/basketball/tournament/poland/orlen-basket-liga/263
+        "tournament_id": 263,
+        "seasons": [
+            {"id": 77879, "name": "PLK 25/26", "code": "2526"},
+            {"id": 65624, "name": "PLK 24/25", "code": "2425"},
+            {"id": 54011, "name": "PLK 23/24", "code": "2324"},
+        ],
+    },
+    "LKL": {
+        # Betsson-LKL (Lithuania top division)
+        # sofascore.com/basketball/tournament/lithuania/betsafe-lkl/975
+        "tournament_id": 975,
+        "seasons": [
+            {"id": 80356, "name": "LKL 25/26", "code": "2526"},
+            {"id": 65649, "name": "LKL 24/25", "code": "2425"},
+            {"id": 54106, "name": "LKL 23/24", "code": "2324"},
+        ],
+    },
 }
