@@ -46,7 +46,9 @@ def build_simulation_params() -> SimulationParams:
     )
 
 
-def run_league_backtest(league_key: str) -> list[BetReport] | None:
+def run_league_backtest(
+    league_key: str, seasonal_weights: bool = False,
+) -> list[BetReport] | None:
     """Train and evaluate a per-league CatBoost classifier on one tournament.
 
     Loads the current-season dataset (season gate applied in ``load_data``),
@@ -60,6 +62,8 @@ def run_league_backtest(league_key: str) -> list[BetReport] | None:
     Args:
         league_key: Value of ``matches.tournament_name`` to isolate
             (e.g. ``"ABA"``, ``"Israel"``, ``"NBA"``).
+        seasonal_weights: Forwarded to ``run_pipeline`` — weight TRAIN rows by
+            season tier (``docs/betting_seasonality.md``); test stays unweighted.
 
     Returns:
         One ``BetReport`` per probability threshold, or ``None`` if the
@@ -78,7 +82,7 @@ def run_league_backtest(league_key: str) -> list[BetReport] | None:
     df     = prepare_dataset()
     params = build_simulation_params()
     spec   = PipelineSpec(name=f"{league_key} — per-league", include=(league_key,))
-    return run_pipeline(df, spec, params)
+    return run_pipeline(df, spec, params, seasonal_weights=seasonal_weights)
 
 
 def _parse_cli() -> argparse.Namespace:
@@ -93,6 +97,11 @@ def _parse_cli() -> argparse.Namespace:
     parser.add_argument(
         "--min-test-rows", type=int, default=None,
         help="Override settings.evaluation.min_test_rows for this run.",
+    )
+    parser.add_argument(
+        "--seasonal-weights", action="store_true",
+        help="Weight TRAIN rows by season tier (Dec-Mar golden / Oct-Nov noise "
+             "/ Apr-Jun anomaly); test split stays unweighted.",
     )
     return parser.parse_args()
 
@@ -120,7 +129,7 @@ def main() -> None:
         )
         settings.evaluation.min_test_rows = args.min_test_rows
 
-    rows = run_league_backtest(args.league)
+    rows = run_league_backtest(args.league, seasonal_weights=args.seasonal_weights)
     if rows is None:
         log.warning(
             "No rows returned — verify tournament_name='%s' exists in DB and "

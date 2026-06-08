@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier
 
@@ -67,6 +68,7 @@ def train_classifier(
     train_df:  pd.DataFrame,
     target_col: str,
     league_key: str | None = None,
+    sample_weight: np.ndarray | None = None,
 ) -> CatBoostClassifier:
     """Train a CatBoostClassifier with the project's standard hyperparameters.
 
@@ -79,6 +81,10 @@ def train_classifier(
             target column.
         target_col: Name of the binary target column (e.g. ``"over_hit"``).
         league_key: Forwarded to ``get_x`` for per-league feature selection.
+        sample_weight: Optional per-row training weights aligned with
+            ``train_df`` (e.g. seasonal weights from
+            :func:`src.evaluation.seasonality.seasonal_sample_weights`). ``None``
+            trains every row with equal weight (the frozen-V6 default).
 
     Returns:
         A fitted ``CatBoostClassifier``.
@@ -96,9 +102,9 @@ def train_classifier(
         random_seed   = cfg.catboost_seed,
         verbose       = 0,
     )
-    model.fit(X_tr, y_tr)
+    model.fit(X_tr, y_tr, sample_weight=sample_weight)
     log.info(
-        "Trained CatBoostClassifier on %d rows × %d features (league=%s).",
-        len(X_tr), X_tr.shape[1], league_key,
+        "Trained CatBoostClassifier on %d rows × %d features (league=%s, weighted=%s).",
+        len(X_tr), X_tr.shape[1], league_key, sample_weight is not None,
     )
     return model
