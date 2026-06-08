@@ -69,3 +69,26 @@ def seasonal_sample_weights(dates: pd.Series) -> np.ndarray:
     """
     months = pd.to_datetime(dates, utc=True).dt.month
     return months.map(weight_for_month).to_numpy(dtype=float)
+
+
+def partition_by_months(
+    df: pd.DataFrame, months: frozenset[int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split ``df`` into (train, test) where test = rows whose month ∈ ``months``.
+
+    Used by the seasonality window probe to deliberately hold out a calendar
+    window (e.g. the Dec–Mar golden window) as the test set and train on the
+    rest. NOTE: this is a regime diagnostic, not a time-honest backtest — the
+    train side may contain matches dated AFTER the test window (future leakage).
+
+    Args:
+        df: Feature-built rows carrying :data:`DATE_COLUMN`.
+        months: Calendar months (1–12) that define the held-out test window.
+
+    Returns:
+        ``(train_df, test_df)``, both reset-index; ``test_df`` holds the window.
+    """
+    in_window = pd.to_datetime(df[DATE_COLUMN], utc=True).dt.month.isin(months)
+    train_df = df[~in_window].reset_index(drop=True)
+    test_df  = df[in_window].reset_index(drop=True)
+    return train_df, test_df
