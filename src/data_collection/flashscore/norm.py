@@ -61,10 +61,19 @@ _EXPAND: list[tuple[str, str]] = [
 ]
 
 
+# Latin letters NFKD does NOT decompose into base+combining (the combining strip
+# misses them) — fold to ASCII so Polish "Wrocław" matches "Wroclaw" and
+# Croatian "Đoković" matches "Dokovic".
+_SPECIAL_FOLD: dict[int, str] = str.maketrans({
+    "ł": "l", "đ": "d", "ø": "o", "ı": "i", "ß": "ss", "æ": "ae", "œ": "oe",
+})
+
+
 def _norm(name: str) -> str:
     name = unicodedata.normalize("NFKD", name)
     name = "".join(c for c in name if not unicodedata.combining(c))
     name = name.lower().strip()
+    name = name.translate(_SPECIAL_FOLD)
     if name in _NAME_ALIASES:
         name = _NAME_ALIASES[name]
     for compound, expanded in _SPLIT_COMPOUNDS:

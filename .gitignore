@@ -30,3 +30,4 @@ skills-lock.json
 
 # Stray legacy grid output (superseded by grid_search_{game,1q,1h}.csv)
 /results/grid_search.csv
+.gstack/
