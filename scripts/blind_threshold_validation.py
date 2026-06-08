@@ -75,6 +75,11 @@ def main() -> None:
     """Run the blind-vs-optimistic threshold comparison for one league."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--league", default=_DEFAULT_LEAGUE)
+    parser.add_argument(
+        "--fixed-threshold", type=float, default=None,
+        help="Pre-registered threshold (e.g. 0.54) applied blindly on test C, "
+             "instead of picking it on validation.",
+    )
     args   = parser.parse_args()
     params = build_simulation_params()
 
@@ -107,6 +112,9 @@ def main() -> None:
              "метод", "порог", "ставок", "winrate", "ROI", "ROI CI95")
     log.info(_row("ОПТИМИСТИЧНЫЙ (peek C)", opt_report))
     log.info(_row("ЧЕСТНЫЙ (blind, val→C)", blind_report))
+    if args.fixed_threshold is not None:
+        fixed_report = _report_at(test_reports, f"{args.fixed_threshold:.2f}")
+        log.info(_row(f"ПРЕ-РЕГ (fixed {args.fixed_threshold:.2f})", fixed_report))
     if opt_report and blind_report:
         log.info("\nΔROI (оптимизм − честность) = %+.2f пп — это и есть selection bias.",
                  opt_report.roi - blind_report.roi)
