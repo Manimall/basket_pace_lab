@@ -109,4 +109,10 @@ COLLECTOR_LEAGUES: dict[str, CollectorLeague] = {
         "season":          "LKL 25/26",
         "season_type":     SeasonType.REGULAR,
     },
+    "BSL": {
+        "path":            "/basketball/turkey/super-lig/",
+        "tournament_name": "BSL",
+        "season":          "Super Lig 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
 }
