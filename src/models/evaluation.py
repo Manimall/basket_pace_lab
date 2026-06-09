@@ -78,6 +78,31 @@ def chrono_split(
     return df.loc[train_idx].sort_values("scheduled_at"), test_parts
 
 
+def chrono_split_3way(
+    df: pd.DataFrame, train_frac: float, val_frac: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Sort by date and slice into (train, val, test) by leading fractions.
+
+    Used by blind-threshold validation: the model trains on ``train``, the bet
+    threshold is selected on ``val`` (unseen by the model), and the fixed
+    threshold is applied on ``test`` — removing post-hoc threshold-selection bias.
+
+    Args:
+        df: Rows to split (mixed leagues are sorted globally by ``scheduled_at``).
+        train_frac: Leading fraction used for model training.
+        val_frac: Next fraction used for threshold selection; ``test`` is the
+            remaining ``1 - train_frac - val_frac``.
+
+    Returns:
+        ``(train_df, val_df, test_df)`` in chronological order.
+    """
+    ordered = df.sort_values("scheduled_at").reset_index(drop=True)
+    n = len(ordered)
+    a = int(n * train_frac)
+    b = int(n * (train_frac + val_frac))
+    return ordered.iloc[:a], ordered.iloc[a:b], ordered.iloc[b:]
+
+
 def train(train_df: pd.DataFrame) -> CatBoostRegressor:
     """Train the global CatBoost MAE regressor on game_total.
 

@@ -195,4 +195,14 @@ LEAGUE_CATALOG: dict[str, LeagueEntry] = {
             {"id": 54106, "name": "LKL 23/24", "code": "2324"},
         ],
     },
+    "BSL": {
+        # Turkish Basketball Super League (Basketbol Süper Ligi)
+        # sofascore.com/basketball/tournament/turkey/super-lig/519
+        "tournament_id": 519,
+        "seasons": [
+            {"id": 81036, "name": "Super Lig 25/26", "code": "2526"},
+            {"id": 65808, "name": "Super Lig 24/25", "code": "2425"},
+            {"id": 54528, "name": "Super Lig 23/24", "code": "2324"},
+        ],
+    },
 }

@@ -22,6 +22,7 @@ from src.config import settings
 from src.evaluation.config import BIN_TARGET, LINE_COL, PIPELINES, PipelineSpec
 from src.evaluation.model import EXCLUDED_FEATURES, get_x, train_classifier
 from src.evaluation.reporting import print_threshold_table
+from src.evaluation.seasonality import DATE_COLUMN, seasonal_sample_weights
 from src.evaluation.simulation import (
     BetReport,
     SimulationParams,
@@ -103,7 +104,10 @@ def _apply_spec(df: pd.DataFrame, spec: PipelineSpec) -> pd.DataFrame:
 
 
 def run_pipeline(
-    df: pd.DataFrame, spec: PipelineSpec, params: SimulationParams,
+    df: pd.DataFrame,
+    spec: PipelineSpec,
+    params: SimulationParams,
+    seasonal_weights: bool = False,
 ) -> list[BetReport] | None:
     """Train + evaluate one per-league pipeline.
 
@@ -114,6 +118,10 @@ def run_pipeline(
         df: Output of ``prepare_dataset``.
         spec: Pipeline specification.
         params: Simulation knobs (odds, stake, thresholds, bootstrap …).
+        seasonal_weights: When ``True``, weight TRAIN rows by season tier
+            (Dec–Mar golden / Oct–Nov noise / Apr–Jun anomaly) per
+            ``docs/betting_seasonality.md``. The test split is always evaluated
+            unweighted, so the metric stays honest.
 
     Returns:
         A list of ``BetReport`` (one per threshold), or ``None`` if the subset
@@ -146,7 +154,15 @@ def run_pipeline(
     # rules (which currently means "no fatigue" — see feature_selector).
     league_key = spec.include[0] if len(spec.include) == 1 else None
 
-    model   = train_classifier(train_df, target_col=BIN_TARGET, league_key=league_key)
+    weights = None
+    if seasonal_weights:
+        weights = seasonal_sample_weights(train_df[DATE_COLUMN])
+        log.info("[%s] seasonal sample_weights on train: mean=%.3f (golden=1.0/noise=0.5/anomaly=0.2)",
+                 spec.name, float(weights.mean()))
+
+    model   = train_classifier(
+        train_df, target_col=BIN_TARGET, league_key=league_key, sample_weight=weights,
+    )
     X_te    = get_x(test_df, league_key=league_key)
     probs   = model.predict_proba(X_te)[:, 1]
     actuals = test_df[TARGET].to_numpy()
