@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import log_loss, roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -57,7 +58,7 @@ class WindowResult:
 
 
 def _probe_window(
-    df, league_key: str, tier: SeasonTier, params: SimulationParams,
+    df: pd.DataFrame, league_key: str, tier: SeasonTier, params: SimulationParams,
 ) -> WindowResult | None:
     """Train on all-but-the-window, evaluate on the held-out ``tier`` window."""
     train_df, test_df = partition_by_months(df, tier.months)
