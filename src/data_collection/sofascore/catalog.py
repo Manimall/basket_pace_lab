@@ -205,4 +205,37 @@ LEAGUE_CATALOG: dict[str, LeagueEntry] = {
             {"id": 54528, "name": "Super Lig 23/24", "code": "2324"},
         ],
     },
+    # ── High-pace regional / summer leagues (2025/2026) ──
+    "KBL": {
+        # Korean Basketball League (men's, South Korea)
+        # sofascore.com/basketball/tournament/south-korea/kbl/1540
+        "tournament_id": 1540,
+        "seasons": [
+            {"id": 78467, "name": "KBL 25/26", "code": "2526"},
+        ],
+    },
+    "LNB_DR": {
+        # Dominican Republic LNB (summer) — distinct from France's "LNB" (156)
+        # sofascore.com/basketball/tournament/dominican-republic/lnb/14089
+        "tournament_id": 14089,
+        "seasons": [
+            {"id": 92524, "name": "LNB Dominicana 2026", "code": "2526"},
+        ],
+    },
+    "BSN": {
+        # Puerto Rico BSN (Baloncesto Superior Nacional, summer)
+        # sofascore.com/basketball/tournament/puerto-rico/bsn/17374
+        "tournament_id": 17374,
+        "seasons": [
+            {"id": 91302, "name": "BSN 2026", "code": "2526"},
+        ],
+    },
+    "WNBA": {
+        # WNBA (women's, USA)
+        # sofascore.com/basketball/tournament/usa/wnba/486
+        "tournament_id": 486,
+        "seasons": [
+            {"id": 89004, "name": "WNBA 2026", "code": "2526"},
+        ],
+    },
 }

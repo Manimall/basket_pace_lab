@@ -43,7 +43,9 @@ _JS_COLLECT_MATCHES = r"""
     document.querySelectorAll('.event__match').forEach(el => {
         const homeEl = el.querySelector('.event__homeParticipant');
         const awayEl = el.querySelector('.event__awayParticipant');
-        const timeEl = el.querySelector('.event__time');
+        // Flashscore renamed the date node .event__time -> .event__stageTime
+        // (2026 DOM refresh); keep a fallback to the old class for resilience.
+        const timeEl = el.querySelector('.event__stageTime, .event__time');
         const firstName = (node) => {
             if (!node) return '';
             for (const child of node.childNodes) {

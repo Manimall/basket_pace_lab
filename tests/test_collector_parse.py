@@ -42,3 +42,18 @@ def test_parse_yearless_resolves_to_recent_past() -> None:
     assert dt is not None
     assert dt.month == 1 and dt.day == 1
     assert dt.date() <= date.today()
+
+
+def test_parse_kbl_season_crosses_year_boundary() -> None:
+    """KBL 25/26 spans Oct 2025–Apr 2026; full dates keep each side's own year.
+
+    Flashscore results pages carry the explicit year for finished-season
+    backfill, so a Dec-2025 and a Jan-2026 fixture must NOT collapse onto one
+    year — this guards the Korean cross-boundary calendar.
+    """
+    autumn = parse_fs_datetime("18.10.2025 19:00")   # early season, 2025
+    winter = parse_fs_datetime("05.01.2026 16:00")    # crosses into 2026
+    spring = parse_fs_datetime("12.04.2026 15:00")    # late season, 2026
+    assert autumn == datetime(2025, 10, 18, 19, 0, tzinfo=timezone.utc)
+    assert winter == datetime(2026, 1, 5, 16, 0, tzinfo=timezone.utc)
+    assert spring == datetime(2026, 4, 12, 15, 0, tzinfo=timezone.utc)
