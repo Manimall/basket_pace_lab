@@ -115,4 +115,32 @@ COLLECTOR_LEAGUES: dict[str, CollectorLeague] = {
         "season":          "Super Lig 25/26",
         "season_type":     SeasonType.REGULAR,
     },
+    # ── High-pace regional / summer leagues (2025/2026) ──
+    "KBL": {
+        # South Korea — crosses the 2025→2026 calendar boundary (Oct–Apr).
+        "path":            "/basketball/south-korea/kbl/",
+        "tournament_name": "KBL",
+        "season":          "KBL 25/26",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "LNB_DR": {
+        # Dominican Republic — key disambiguated from France's "LNB".
+        "path":            "/basketball/dominican-republic/lnb/",
+        "tournament_name": "LNB_DR",
+        "season":          "LNB Dominicana 2026",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "BSN": {
+        # Puerto Rico — Baloncesto Superior Nacional (summer, high totals).
+        "path":            "/basketball/puerto-rico/bsn/",
+        "tournament_name": "BSN",
+        "season":          "BSN 2026",
+        "season_type":     SeasonType.REGULAR,
+    },
+    "WNBA": {
+        "path":            "/basketball/usa/wnba/",
+        "tournament_name": "WNBA",
+        "season":          "WNBA 2026",
+        "season_type":     SeasonType.REGULAR,
+    },
 }
