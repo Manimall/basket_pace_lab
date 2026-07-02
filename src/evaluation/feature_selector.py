@@ -124,6 +124,19 @@ FEATURES_BY_LEAGUE: dict[str, frozenset[FeatureGroup]] = {
     "NBL":        frozenset({FeatureGroup.BASE}),
     "ABA":        frozenset({FeatureGroup.BASE}),
 
+    # ── High-pace 2025/26 leagues — assigned from a per-league grid search ──
+    # BSN: FATIGUE lifts AUC 0.496→0.557 (>0.52) at ROI +2.3%; TEAM_ADV HURT it
+    #      (AUC→0.43, ROI −24..−32%), so it is dropped despite 91% box-score.
+    "BSN":        frozenset({FeatureGroup.BASE, FeatureGroup.FATIGUE}),
+    # KBL/WNBA/LNB_DR: no combo cleared AUC>0.52, so they stay on BASE.
+    #   KBL   — FATIGUE helped (0.407→0.435) but sub-0.52; TEAM_ADV unavailable
+    #           (Sofascore box score empty for KBL).
+    #   WNBA  — sub-coin-flip everywhere; TEAM_ADV tested (89% cov) and FAILED.
+    #   LNB_DR— too small for a per-league model (train<100), left on default.
+    "KBL":        frozenset({FeatureGroup.BASE}),
+    "WNBA":       frozenset({FeatureGroup.BASE}),
+    "LNB_DR":     frozenset({FeatureGroup.BASE}),
+
     # ── UNPROFITABLE — BASE fallback + WARNING ─────────────────────────────
     # CBA: AUC=0.459 — модель предсказывает наоборот, полный бан.
     "CBA":        frozenset({FeatureGroup.BASE}),
