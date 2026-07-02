@@ -118,7 +118,10 @@ def test_lnb_enables_team_adv_excludes_fatigue() -> None:
 
 # ── BASE-only leagues ─────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("league", ["Israel", "BLeague", "NBL", "ABA"])
+@pytest.mark.parametrize(
+    "league",
+    ["Israel", "BLeague", "NBL", "ABA"],
+)
 def test_base_only_leagues_exclude_fatigue_and_team_adv(league: str) -> None:
     excluded = get_excluded_features(league)
     for col in FATIGUE_FEATURE_COLS:
