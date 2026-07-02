@@ -17,6 +17,7 @@ Two invariants drive feature exclusion:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -64,17 +65,60 @@ def get_x(df: pd.DataFrame, league_key: str | None = None) -> pd.DataFrame:
     return X
 
 
+@dataclass(frozen=True)
+class ModelHyperparams:
+    """A typed CatBoost hyperparameter set (single source for model search).
+
+    ``l2_leaf_reg = None`` leaves CatBoost's own default in place (so the V6
+    baseline is not pinned to a magic number); set it to regularise harder.
+    """
+
+    iterations:    int
+    learning_rate: float
+    depth:         int
+    random_seed:   int
+    l2_leaf_reg:   float | None = None
+
+
+def default_hyperparams() -> ModelHyperparams:
+    """The frozen-V6 hyperparameters, sourced from ``settings.model``."""
+    cfg = settings.model
+    return ModelHyperparams(
+        iterations    = cfg.catboost_iterations,
+        learning_rate = cfg.catboost_lr,
+        depth         = cfg.catboost_depth,
+        random_seed   = cfg.catboost_seed,
+    )
+
+
+def build_classifier(hp: ModelHyperparams) -> CatBoostClassifier:
+    """Construct (unfitted) a CatBoostClassifier from a hyperparameter set."""
+    extra = {} if hp.l2_leaf_reg is None else {"l2_leaf_reg": hp.l2_leaf_reg}
+    return CatBoostClassifier(
+        iterations    = hp.iterations,
+        learning_rate = hp.learning_rate,
+        depth         = hp.depth,
+        loss_function = "Logloss",
+        eval_metric   = "AUC",
+        cat_features  = CAT_COLS,
+        random_seed   = hp.random_seed,
+        verbose       = 0,
+        **extra,
+    )
+
+
 def train_classifier(
     train_df:  pd.DataFrame,
     target_col: str,
     league_key: str | None = None,
     sample_weight: np.ndarray | None = None,
+    hyperparams: ModelHyperparams | None = None,
 ) -> CatBoostClassifier:
     """Train a CatBoostClassifier with the project's standard hyperparameters.
 
-    Hyperparameters come from ``settings.model`` (iterations / lr / depth /
-    seed). Loss is Logloss, eval metric is AUC — matched to a binary
-    classification task on ``target_col``.
+    Hyperparameters default to ``settings.model`` (the frozen V6 set); pass
+    ``hyperparams`` to override them (used by model search). Loss is Logloss,
+    eval metric is AUC — matched to a binary classification task.
 
     Args:
         train_df: Training rows with both the feature columns and the binary
@@ -85,23 +129,15 @@ def train_classifier(
             ``train_df`` (e.g. seasonal weights from
             :func:`src.evaluation.seasonality.seasonal_sample_weights`). ``None``
             trains every row with equal weight (the frozen-V6 default).
+        hyperparams: Optional CatBoost override. ``None`` uses
+            :func:`default_hyperparams` (unchanged V6 behaviour).
 
     Returns:
         A fitted ``CatBoostClassifier``.
     """
     X_tr = get_x(train_df, league_key)
     y_tr = train_df[target_col].astype(int).to_numpy()
-    cfg  = settings.model
-    model = CatBoostClassifier(
-        iterations    = cfg.catboost_iterations,
-        learning_rate = cfg.catboost_lr,
-        depth         = cfg.catboost_depth,
-        loss_function = "Logloss",
-        eval_metric   = "AUC",
-        cat_features  = CAT_COLS,
-        random_seed   = cfg.catboost_seed,
-        verbose       = 0,
-    )
+    model = build_classifier(hyperparams or default_hyperparams())
     model.fit(X_tr, y_tr, sample_weight=sample_weight)
     log.info(
         "Trained CatBoostClassifier on %d rows × %d features (league=%s, weighted=%s).",
