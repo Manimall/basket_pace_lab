@@ -143,4 +143,12 @@ COLLECTOR_LEAGUES: dict[str, CollectorLeague] = {
         "season":          "WNBA 2026",
         "season_type":     SeasonType.REGULAR,
     },
+    # ── B.League (Japan) prior-season archive, for multi-season walk-forward.
+    # Same tournament_name as the current 25/26 data so they pool into one league.
+    "BLeague_2425": {
+        "path":            "/basketball/japan/b-league-2024-2025/",
+        "tournament_name": "BLeague",
+        "season":          "B.League 24/25",
+        "season_type":     SeasonType.REGULAR,
+    },
 }
