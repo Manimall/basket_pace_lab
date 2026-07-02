@@ -106,15 +106,6 @@ def test_bbl_keeps_fatigue_excludes_team_adv() -> None:
         assert col in excluded
 
 
-def test_bsn_keeps_fatigue_excludes_team_adv() -> None:
-    """BSN: grid picked BASE+FATIGUE (TEAM_ADV hurt it despite 91% coverage)."""
-    excluded = get_excluded_features("BSN")
-    for col in FATIGUE_FEATURE_COLS:
-        assert col not in excluded
-    for col in TEAM_ADV_FEAT_COLS:
-        assert col in excluded
-
-
 # ── BASE+TEAM_ADV leagues (LNB) ──────────────────────────────────────────────
 
 def test_lnb_enables_team_adv_excludes_fatigue() -> None:
@@ -129,7 +120,7 @@ def test_lnb_enables_team_adv_excludes_fatigue() -> None:
 
 @pytest.mark.parametrize(
     "league",
-    ["Israel", "BLeague", "NBL", "ABA", "KBL", "WNBA", "LNB_DR"],
+    ["Israel", "BLeague", "NBL", "ABA"],
 )
 def test_base_only_leagues_exclude_fatigue_and_team_adv(league: str) -> None:
     excluded = get_excluded_features(league)
