@@ -1,0 +1,72 @@
+﻿date,home,away,total_line,quarter_line,q1,q2,q3,q4,q4_result
+2025-12-13,Xinjiang Flying Tigers,Fujian Sturgeons,182.5,45.62,53,46,49,42,ТМ
+2025-12-13,Beijing Royal Fighters,Shandong Heroes,170.5,42.62,48,44,52,45,ТБ
+2025-12-14,Guangdong Southern Tigers,Nanjing Monkey Kings,175.5,43.88,46,51,57,34,ТМ
+2025-12-16,Shenzhen Leopards,Jilin Northeast Tigers,173.5,43.38,44,50,46,40,ТМ
+2025-12-18,Qingdao Eagles,Nanjing Monkey Kings,184.5,46.12,47,48,55,37,ТМ
+2025-12-19,Jiangsu Dragons,Shanghai Sharks,180.5,45.12,62,51,51,26,ТМ
+2025-12-19,Guangdong Southern Tigers,Guangzhou Loong Lions,179.5,44.88,51,51,45,44,ТМ
+2025-12-24,Shenzhen Leopards,Sichuan Blue Whales,158.5,39.62,57,41,44,41,ТБ
+2025-12-27,Zhejiang Guangsha Lions,Shenzhen Leopards,174.5,43.62,45,52,44,49,ТБ
+2025-12-28,Ningbo Rockets,Tianjin Pioneers,177.5,44.38,52,51,46,50,ТБ
+2025-12-30,Ningbo Rockets,Sichuan Blue Whales,165.5,41.38,44,51,43,41,ТМ
+2025-12-31,Shenzhen Leopards,Beijing Royal Fighters,175.5,43.88,55,51,53,47,ТБ
+2026-01-02,Nanjing Monkey Kings,Jilin Northeast Tigers,171.5,42.88,49,43,55,39,ТМ
+2026-01-03,Sichuan Blue Whales,Qingdao Eagles,164.5,41.12,51,47,56,52,ТБ
+2026-01-04,Fujian Sturgeons,Xinjiang Flying Tigers,178.5,44.62,56,58,49,41,ТМ
+2026-01-10,Fujian Sturgeons,Tianjin Pioneers,185.5,46.38,60,48,58,43,ТМ
+2026-01-13,Shenzhen Leopards,Shanghai Sharks,183.5,45.88,51,55,59,39,ТМ
+2026-01-15,Shandong Heroes,Ningbo Rockets,176.5,44.12,54,45,56,36,ТМ
+2026-01-15,Beijing Royal Fighters,Jiangsu Dragons,172.5,43.12,49,50,47,59,ТБ
+2026-01-16,Nanjing Monkey Kings,Shenzhen Leopards,186.5,46.62,48,65,52,36,ТМ
+2026-01-17,Sichuan Blue Whales,Jilin Northeast Tigers,173.5,43.38,49,49,45,39,ТМ
+2026-01-17,Guangdong Southern Tigers,Beijing Royal Fighters,185.5,46.38,49,62,49,37,ТМ
+2026-01-18,Shanxi Loongs,Fujian Sturgeons,183.5,45.88,48,47,51,41,ТМ
+2026-01-21,Jilin Northeast Tigers,Guangdong Southern Tigers,176.5,44.12,58,57,60,42,ТМ
+2026-01-23,Fujian Sturgeons,Shanghai Sharks,185.5,46.38,52,47,57,34,ТМ
+2026-01-27,Qingdao Eagles,Zhejiang Guangsha Lions,162.5,40.62,51,43,48,35,ТМ
+2026-01-31,Liaoning Flying Leopards,Tianjin Pioneers,166.5,41.62,43,52,49,52,ТБ
+2026-02-01,Beijing Ducks,Qingdao Eagles,161.5,40.38,54,50,41,31,ТМ
+2026-02-01,Fujian Sturgeons,Beijing Royal Fighters,186.5,46.62,51,57,51,30,ТМ
+2026-02-03,Sichuan Blue Whales,Shanxi Loongs,156.5,39.12,41,43,46,15,ТМ
+2026-02-03,Liaoning Flying Leopards,Jiangsu Dragons,159.5,39.88,40,41,40,39,ТМ
+2026-03-11,Shandong Heroes,Jiangsu Dragons,173.5,43.38,58,56,59,44,ТБ
+2026-03-11,Shenzhen Leopards,Liaoning Flying Leopards,176.5,44.12,46,52,48,38,ТМ
+2026-03-11,Shanghai Sharks,Beijing Royal Fighters,178.5,44.62,55,55,48,40,ТМ
+2026-03-11,Zhejiang Guangsha Lions,Nanjing Monkey Kings,180.5,45.12,61,48,51,33,ТМ
+2026-03-12,Qingdao Eagles,Fujian Sturgeons,177.5,44.38,48,58,51,41,ТМ
+2026-03-13,Xinjiang Flying Tigers,Jilin Northeast Tigers,163.5,40.88,46,46,42,37,ТМ
+2026-03-13,Beijing Royal Fighters,Tianjin Pioneers,181.5,45.38,53,51,52,48,ТБ
+2026-03-13,Shenzhen Leopards,Guangdong Southern Tigers,195.5,48.88,51,56,50,41,ТМ
+2026-03-14,Guangzhou Loong Lions,Beijing Ducks,174.5,43.62,49,44,50,40,ТМ
+2026-03-14,Sichuan Blue Whales,Shanghai Sharks,161.5,40.38,50,59,54,45,ТБ
+2026-03-15,Xinjiang Flying Tigers,Beijing Royal Fighters,172.5,43.12,57,47,46,42,ТМ
+2026-03-18,Zhejiang Guangsha Lions,Jilin Northeast Tigers,165.5,41.38,56,45,43,46,ТБ
+2026-03-19,Fujian Sturgeons,Beijing Ducks,179.5,44.88,54,50,52,57,ТБ
+2026-03-21,Shanghai Sharks,Sichuan Blue Whales,173.5,43.38,46,48,55,33,ТМ
+2026-03-21,Zhejiang Golden Bulls,Jilin Northeast Tigers,168.5,42.12,47,44,48,32,ТМ
+2026-03-21,Nanjing Monkey Kings,Qingdao Eagles,182.5,45.62,48,51,48,36,ТМ
+2026-03-22,Shenzhen Leopards,Tianjin Pioneers,198.5,49.62,51,54,51,44,ТМ
+2026-03-24,Shenzhen Leopards,Jiangsu Dragons,187.5,46.88,50,50,47,41,ТМ
+2026-03-25,Xinjiang Flying Tigers,Shandong Heroes,177.5,44.38,50,47,51,36,ТМ
+2026-03-27,Guangdong Southern Tigers,Beijing Ducks,180.5,45.12,50,46,50,43,ТМ
+2026-03-27,Fujian Sturgeons,Shenzhen Leopards,197.5,49.38,55,60,51,45,ТМ
+2026-03-29,Jilin Northeast Tigers,Shenzhen Leopards,178.5,44.62,49,52,55,41,ТМ
+2026-03-31,Jilin Northeast Tigers,Shanghai Sharks,189.5,47.38,49,50,48,52,ТБ
+2026-04-02,Shenzhen Leopards,Zhejiang Guangsha Lions,191.5,47.88,57,65,50,31,ТМ
+2026-04-03,Jilin Northeast Tigers,Sichuan Blue Whales,162.5,40.62,43,48,51,46,ТБ
+2026-04-04,Nanjing Monkey Kings,Jiangsu Dragons,185.5,46.38,48,53,48,46,ТМ
+2026-04-05,Zhejiang Golden Bulls,Fujian Sturgeons,180.5,45.12,49,51,49,34,ТМ
+2026-04-06,Shanxi Loongs,Qingdao Eagles,189.5,47.38,51,50,54,42,ТМ
+2026-04-07,Liaoning Flying Leopards,Fujian Sturgeons,185.5,46.38,57,55,56,47,ТБ
+2026-04-08,Ningbo Rockets,Shanghai Sharks,183.5,45.88,59,53,55,49,ТБ
+2026-04-10,Shanghai Sharks,Fujian Sturgeons,199.5,49.88,54,64,62,55,ТБ
+2026-04-13,Sichuan Blue Whales,Shenzhen Leopards,186.5,46.62,60,55,60,64,ТБ
+2026-04-15,Liaoning Flying Leopards,Nanjing Monkey Kings,179.5,44.88,51,56,47,44,ТМ
+2026-04-17,Shenzhen Leopards,Ningbo Rockets,182.5,45.62,50,47,60,45,ТМ
+2026-04-19,Zhejiang Guangsha Lions,Beijing Royal Fighters,177.5,44.38,45,60,54,35,ТМ
+2026-04-19,Qingdao Eagles,Beijing Ducks,167.5,41.88,42,50,45,48,ТБ
+2026-05-06,Beijing Ducks,Guangdong Southern Tigers,168.5,42.12,54,44,50,48,ТБ
+2026-05-07,Shenzhen Leopards,Zhejiang Golden Bulls,182.5,45.62,50,59,47,47,ТБ
+2026-05-07,Zhejiang Guangsha Lions,Shanxi Loongs,178.5,44.62,50,46,47,39,ТМ
+2026-05-16,Zhejiang Guangsha Lions,Shenzhen Leopards,187.5,46.88,49,64,48,52,ТБ
